@@ -966,8 +966,15 @@ Never use a production private key in tests.
 
 The GitHub workflow runs tests, SAST, and `npm audit` on Linux and Windows.
 The separate CodeQL workflow performs deeper JavaScript security analysis when
-hosted in a GitHub repository with CodeQL available. CodeQL is not executed by
-the local `sast` command. Review tool output; do not blanket-suppress findings.
+code scanning is enabled on GitHub. CodeQL is available free for public
+repositories; private repositories require an eligible GitHub Code Security
+license. In repository Settings > Code security, enable code scanning with
+advanced setup to use the committed workflow rather than adding default setup.
+The CodeQL job requires `actions: read`, `contents: read`, and
+`security-events: write`. Both workflows use Node.js 24-based actions and pin
+Linux runners to Ubuntu 24.04 to avoid automatic OS migration.
+CodeQL is not executed by the local `sast` command. Review tool output; do not
+blanket-suppress findings.
 Dependency audit checks installed development packages too.
 The `minimatch` override requires patched 11.0.1+ to address
 GHSA-g3hv-75wg-m249 in ESLint's development dependency tree. Remove the override
