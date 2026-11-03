@@ -3,6 +3,10 @@
 An original, small Node.js BBS server. Inspired by Renegade,
 Telegard, and TAG and others from the 90s.
 
+## License
+
+Licensed under the [MIT License](LICENSE).
+
 ## Requirements and quick start
 
 - Node.js **24.13+** (includes `node:sqlite`); no runtime packages.
