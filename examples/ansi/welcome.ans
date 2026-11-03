@@ -1,0 +1,13 @@
+[0;36;40mWelcome to
+%BBSNAME%
+
+Caller: %USERNAME%
+Node: %NODE%
+%DATE%
+
+%TAGLINE%
+
+%TRANSPORT%
+
+This original sample is streamed at simulated modem speed.
+The server supplies the any-key pause after playback.

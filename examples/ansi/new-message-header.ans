@@ -1,0 +1,9 @@
+[0;36;40mNOCTURNO // Message reader
+[3;1HFrom: ~SN                     
+[4;1HTo:   ~RN                     
+[5;1HDate: ~DT        [5;30HTime: ~TI  
+[6;1HNumber: ~MN   
+[7;1HBase: ~MA                             
+[9;1HSubject: ~MT                                               
+[12;1HMessage text begins below. Rows 23-24 belong to navigation.
+[14;1H~TL

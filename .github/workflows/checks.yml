@@ -1,0 +1,32 @@
+name: Tests and security checks
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  checks:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Create ephemeral TLS test certificate
+        shell: bash
+        run: |
+          MSYS_NO_PATHCONV=1 openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
+            -keyout "$RUNNER_TEMP/bbs-test-key.pem" \
+            -out "$RUNNER_TEMP/bbs-test-cert.pem" \
+            -subj "/CN=localhost" -addext "subjectAltName=DNS:localhost"
+          echo "BBS_TEST_CERT=$RUNNER_TEMP/bbs-test-cert.pem" >> "$GITHUB_ENV"
+          echo "BBS_TEST_KEY=$RUNNER_TEMP/bbs-test-key.pem" >> "$GITHUB_ENV"
+      - run: npm run lint
+      - run: npm run test:coverage
+      - run: npm run sast
+      - run: npm run audit

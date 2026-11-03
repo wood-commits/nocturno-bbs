@@ -1,0 +1,8 @@
+[0;36;40mNOCTURNO // Login form
+[3;1H%BBSNAME%
+[5;1Hhandle:   ~LN
+[7;1Hpasswd:   ~LP
+[10;1H~LI
+[12;1H~LH
+[16;1HThe input markers place the cursor after these labels.
+Passwords stay hidden; the server supplies help and validation.

@@ -1,0 +1,11 @@
+[0;37;40mNOCTURNO // Main menu
+[3;1H%BBSNAME%
+[4;1HCaller: %USERNAME%
+[7;3H                      [7;29H email         [7;55H user config   
+[9;29H user list     [9;55H files         
+[11;3H message menu  [11;29H note to sysop [11;55H qwk mail menu 
+[13;3H automessage   [13;29H page sysop    [13;55H your stats    
+[15;3H bbs list      [15;29H last callers  [15;55H oneliners     
+[17;3H doors         [17;29H autosig menu  [17;55H goodbye       
+[21;1HArrows and Enter select a label. Press ? for letter shortcuts.
+[22;1HKeep these lowercase labels intact for the generated lightbar.

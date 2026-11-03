@@ -1,0 +1,11 @@
+[0;1;37;40mNOCTURNO sample login matrix
+Use the arrow keys and Enter, or a letter shortcut.
+
+The five fields below are renderer-controlled lightbar labels.
+[5;54H~01                   
+[6;54H~02                   
+[7;54H~03                   
+[8;54H~04                   
+[9;54H~05                   
+[12;3HEach label uses a numbered marker; see ANSI.md for the mapping.
+[22;1HRows 23-24 are reserved for generated warnings and navigation.

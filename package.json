@@ -1,0 +1,27 @@
+{
+  "name": "nocturno-bbs",
+  "version": "0.1.0",
+  "private": true,
+  "description": "An ANSI telnet bulletin board inspired by the 1990s.",
+  "type": "module",
+  "engines": { "node": ">=24.13.0" },
+  "scripts": {
+    "start": "node src/index.js",
+    "mcp": "node src/mcp.js",
+    "test": "node --test",
+    "test:coverage": "node --test --experimental-test-coverage",
+    "lint": "eslint .",
+    "sast": "eslint src test --max-warnings 0",
+    "audit": "npm audit --audit-level=low",
+    "check": "npm run lint && npm test && npm run sast && npm run audit"
+  },
+  "devDependencies": {
+    "@eslint/compat": "^2.1.1",
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.0.0",
+    "eslint-plugin-security": "^3.0.1"
+  },
+  "overrides": {
+    "minimatch": "^11.0.1"
+  }
+}

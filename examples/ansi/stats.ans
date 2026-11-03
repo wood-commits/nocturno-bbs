@@ -1,0 +1,14 @@
+[0;36;40mNOCTURNO // Caller statistics
+
+%BBSNAME%
+
+Caller: %USERNAME%
+Access: %ACCESS%
+Calls: %CALLS%
+Posts: %POSTS%
+Mail waiting: %MAIL%
+Uploads: %UPLOADS%
+Downloads: %DOWNLOADS%
+
+User note:
+%USERNOTE%

@@ -1,0 +1,20 @@
+node_modules/
+data/
+coverage/
+# Operator artwork is private; publish only examples/ansi.
+/ansi/
+/.vscode/
+.env.*
+!.env.example
+*.db
+*.db-*
+*.sqlite3*
+*.log
+*.p12
+*.pfx
+*.jks
+*.pem
+*.key
+*.crt
+.env
+*.sqlite*
