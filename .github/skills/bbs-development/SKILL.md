@@ -22,7 +22,10 @@ Follow the byte-to-screen path:
 5. `src/auth.js` owns scrypt, timing-safe checks and bounded password work.
 6. `src/store.js` owns SQLite schema, queries and public data projections.
 7. `src/screens.js` produces ANSI menus and the local sysop dashboard.
-8. `src/index.js` owns startup, sanitized error reporting and graceful shutdown.
+8. `src/index.js` owns startup and graceful shutdown. `src/errors.js` supplies
+   the shared sanitized reporter for the executable and server default:
+   allowlisted code/name only, at most 64 characters, never message/stack.
+   Trusted custom onError callbacks still receive original errors; never log them raw.
 9. `src/sysop.js` owns local sysop navigation, confirmations and bounded raw-TTY
    keyboard input. It is never reachable from a caller's telnet session.
 10. `src/presentation.js` loads fixed optional ANSI templates at startup, validates
@@ -248,7 +251,11 @@ Follow the byte-to-screen path:
   `user_note`/USERNOTE is separate from local-only `sysop_note`.
 - File payloads use generated UUID names under BBS_DATA_DIR/files, with lazy
   directory creation. Preserve approved catalogs, reserved IDs and durable
-  completed transfer counts. Backup payloads with the stopped SQLite database.
+  completed transfer counts. Downloads open once, then compare descriptor and
+  non-symlink pathname device/inode identities using bigint stats before reading;
+  reject missing/zero identities. Retain O_NOFOLLOW where available and always
+  close the descriptor on failure. Keep local ACLs private to prevent in-place
+  tampering. Backup payloads with the stopped SQLite database.
 
 ## Change procedure
 

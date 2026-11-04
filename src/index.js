@@ -4,18 +4,13 @@ import { config } from './config.js';
 import { ansi } from './screens.js';
 import { startSysopConsole } from './sysop.js';
 import { startMcpServer } from './mcp-server.js';
+import { reportError as report } from './errors.js';
 
 let store;
 let bbs;
 let sysop;
 let mcp;
 let shuttingDown = false;
-const report = error => {
-  // Error text is not rendered into the terminal: peer-controlled text may contain ANSI.
-  const code = String(error.code ?? error.name ?? 'Error').replace(/[^A-Za-z0-9_-]/g, '?');
-  process.stderr.write(`\r\n[BBS error: ${code}] See README troubleshooting; no credentials logged.\r\n`);
-};
-
 async function shutdown() {
   if (shuttingDown) return;
   shuttingDown = true;

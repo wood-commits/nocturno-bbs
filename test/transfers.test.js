@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, rmSync, readdirSync, existsSync } from 'node:fs';
+import fs, { mkdirSync, rmSync, readdirSync, existsSync, constants } from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { deflateRawSync } from 'node:zlib';
@@ -295,6 +296,80 @@ test('file catalog quarantines uploads; storage validates identity, paths, permi
   assert.equal(f.transfers.catalog(f.user).length, 0);
   const replacement = f.transfers.save(f.user, 'next', bytes);
   assert.ok(replacement > id);
+});
+
+test('downloads validate the opened file identity before reading and always close it', async t => {
+  for (const scenario of ['valid', 'replaced inode', 'replaced device', 'symlink', 'unknown identity',
+    'wrong size', 'non-file', 'missing entry', 'open rejected', 'descriptor error', 'read error', 'short read']) {
+    await t.test(scenario, t => {
+      const f = fixture(t), bytes = Buffer.from('approved bytes');
+      const id = f.transfers.save(f.user, 'safe.dat', bytes);
+      f.transfers.approve(id);
+      const path = f.transfers.storagePath(f.store.db.prepare('SELECT storage_key FROM transfer_files WHERE id = ?').get(id).storage_key);
+      const original = { openSync: fs.openSync, lstatSync: fs.lstatSync,
+        fstatSync: fs.fstatSync, readSync: fs.readSync, closeSync: fs.closeSync };
+      const calls = [];
+      let opened;
+      t.mock.method(fs, 'openSync', (target, flags) => {
+        assert.equal(target, path);
+        assert.equal(flags, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+        calls.push('open');
+        if (scenario === 'open rejected') throw Object.assign(new Error('Symlink rejected'), { code: 'ELOOP' });
+        // Emulate a filesystem without O_NOFOLLOW, regardless of the test host.
+        opened = original.openSync(target, constants.O_RDONLY);
+        return opened;
+      });
+      t.mock.method(fs, 'fstatSync', (fd, options) => {
+        assert.equal(fd, opened);
+        calls.push('descriptor');
+        if (scenario === 'descriptor error') throw Object.assign(new Error('Descriptor unavailable'), { code: 'EIO' });
+        const stat = original.fstatSync(fd, options);
+        if (scenario === 'unknown identity') stat.ino = 0n;
+        if (scenario === 'wrong size') stat.size += 1n;
+        if (scenario === 'non-file') stat.isFile = () => false;
+        return stat;
+      });
+      t.mock.method(fs, 'lstatSync', (target, options) => {
+        const stat = original.lstatSync(target, options);
+        if (target !== path) return stat;
+        assert.ok(opened !== undefined, 'No pathname check before open');
+        calls.push('entry');
+        if (scenario === 'missing entry') throw Object.assign(new Error('Removed after open'), { code: 'ENOENT' });
+        if (scenario === 'replaced inode') stat.ino += 1n;
+        if (scenario === 'replaced device') stat.dev += 1n;
+        if (scenario === 'symlink') {
+          stat.isFile = () => false;
+          stat.isSymbolicLink = () => true;
+        }
+        return stat;
+      });
+      t.mock.method(fs, 'readSync', (...args) => {
+        calls.push('read');
+        if (scenario === 'read error') throw Object.assign(new Error('Read failed'), { code: 'EIO' });
+        if (scenario === 'short read') return 0;
+        return original.readSync(...args);
+      });
+      t.mock.method(fs, 'closeSync', fd => {
+        calls.push('close');
+        return original.closeSync(fd);
+      });
+      t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
+      syncBuiltinESMExports();
+      if (scenario === 'valid') {
+        assert.deepEqual(f.transfers.download(f.user, id).data, bytes);
+        assert.deepEqual(calls, ['open', 'descriptor', 'entry', 'read', 'close']);
+      } else {
+        const expected = scenario === 'missing entry' ? { code: 'ENOENT' } :
+          scenario === 'open rejected' ? { code: 'ELOOP' } :
+            scenario === 'descriptor error' || scenario === 'read error' ? { code: 'EIO' } : InputError;
+        assert.throws(() => f.transfers.download(f.user, id), expected);
+        assert.deepEqual(calls, scenario === 'open rejected' ? ['open'] :
+          scenario === 'descriptor error' ? ['open', 'descriptor', 'close'] :
+            scenario === 'read error' || scenario === 'short read' ? ['open', 'descriptor', 'entry', 'read', 'close'] :
+              ['open', 'descriptor', 'entry', 'close']);
+      }
+    });
+  }
 });
 
 test('ZIP stored archives interoperate with directory metadata and reject CRC, traversal and bombs', () => {

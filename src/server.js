@@ -7,9 +7,10 @@ import { Presentation } from './presentation.js';
 import { Community } from './community.js';
 import { Transfers } from './transfers.js';
 import { LocalSocket } from './local-terminal.js';
+import { reportError } from './errors.js';
 
 export async function createBbs({ store, name = 'Nocturno BBS', port = 2323,
-  tlsOptions, tlsPort = 9923, tlsHost = '127.0.0.1', onError = console.error, ansiDirectory, transferDirectory }) {
+  tlsOptions, tlsPort = 9923, tlsHost = '127.0.0.1', onError = reportError, ansiDirectory, transferDirectory }) {
   store.initSettings(name);
   const presentation = new Presentation(ansiDirectory);
   const community = new Community(store);

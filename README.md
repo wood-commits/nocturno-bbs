@@ -920,7 +920,14 @@ proxy, or reuse credentials from other systems.
 - No HTTP server, shell execution, dynamic module loading, or user-chosen
   filesystem paths. Configuration is trusted local operator input.
 - Error logs contain only sanitized error codes, never passwords, raw commands,
-  caller-supplied ANSI, or database contents.
+  caller-supplied ANSI, or database contents. The executable and the server's
+  default reporter share this policy; diagnostic codes are limited to 64 characters.
+  Custom `onError` callbacks receive the original error and must never log it raw.
+- Downloads open a payload once and validate its descriptor against the current
+  non-symlink directory entry using exact device/inode identities before reading.
+  Filesystems that cannot provide a nonzero file identity are rejected.
+  Keep the payload directory private: these checks do not protect against a
+  local user who can modify an approved file's contents in place.
 
 This is a **single-process starter**, not a hardened public hosting platform.
 There is no password recovery, caller self-service account removal, per-account lockout, or

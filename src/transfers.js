@@ -171,16 +171,18 @@ export class Transfers {
     this.ensureDirectory();
     const path = this.storagePath(row.storage_key);
     // eslint-disable-next-line security/detect-non-literal-fs-filename
-    if (lstatSync(path).isSymbolicLink()) throw new InputError('Stored file is unavailable. Contact the sysop.');
-    // O_NOFOLLOW is unavailable on some supported Windows filesystems.
-    // eslint-disable-next-line security/detect-non-literal-fs-filename
     const fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
     try {
-      const stat = fstatSync(fd);
-      if (!stat.isFile() || stat.size !== row.size || stat.size < 1 || stat.size > TRANSFER_LIMITS.file) {
+      const stat = fstatSync(fd, { bigint: true });
+      // Check the opened identity before reading, including where Windows lacks O_NOFOLLOW.
+      // eslint-disable-next-line security/detect-non-literal-fs-filename
+      const entry = lstatSync(path, { bigint: true });
+      if (!stat.isFile() || !entry.isFile() || entry.isSymbolicLink() || stat.ino <= 0n ||
+          stat.ino !== entry.ino || stat.dev !== entry.dev ||
+          stat.size !== BigInt(row.size) || row.size < 1 || row.size > TRANSFER_LIMITS.file) {
         throw new InputError('Stored file is unavailable. Contact the sysop.');
       }
-      const data = Buffer.alloc(stat.size);
+      const data = Buffer.alloc(row.size);
       let offset = 0;
       while (offset < data.length) {
         const n = readSync(fd, data, offset, data.length - offset, offset);
