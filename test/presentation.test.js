@@ -4,7 +4,9 @@ import { mkdtempSync, readFileSync, writeFileSync, rmSync, mkdirSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { Presentation, displayString, screenTokens, mainChoices, mainChoiceGrid } from '../src/presentation.js';
+import { Presentation, displayString, screenTokens, loginChoices, mainChoices, mainChoiceGrid } from '../src/presentation.js';
+import { LocalTerminal, terminalText } from '../src/local-terminal.js';
+import { terminal as rgbTerminal } from './helpers/ansi-terminal.js';
 import { Store } from '../src/store.js';
 import { InputError } from '../src/validation.js';
 import { ui, pipeText, plainText, stringDefaults, errorText, safeText } from '../src/strings.js';
@@ -25,7 +27,7 @@ function writeTemplate(path, name, source) {
   writeFileSync(join(path, `${name}.ans`), source);
 }
 
-function terminal(frame, { immediate = false, modernColors = true, wrapControl = true, brightBackground = true } = {}) {
+function terminal(frame, { immediate = false, modernColors = true, wrapControl = true, brightBackground = true, inverseControl = true } = {}) {
   let row = 0, column = 0, scrolls = 0, foreground = 7, background = 0;
   let bold = false, inverse = false, wrap = true;
   const blank = () => Array.from({ length: 80 }, () => ({ char: ' ', fg: 7, bg: 0 }));
@@ -51,7 +53,7 @@ function terminal(frame, { immediate = false, modernColors = true, wrapControl =
         for (const value of params) {
           if (value === 0) { foreground = 7; background = 0; bold = false; inverse = false; }
           else if (value === 1) bold = true;
-          else if (value === 7) inverse = true;
+          else if (inverseControl && value === 7) inverse = true;
           else if (modernColors && value === 22) bold = false;
           else if (modernColors && value === 27) inverse = false;
           else if (value >= 30 && value <= 37) foreground = value - 30;
@@ -88,6 +90,29 @@ test('Renegade pipe prompts use the DOS palette, backgrounds, escapes and reset 
     else assert.equal(cell.bg, palette[code - 16]);
   }
   assert.equal(plainText(pipeText('||03 |||| |24')), '|03 || |24');
+});
+
+test('default menu brackets are normal cyan and shortcut keys stay bright locally and remotely', () => {
+  const entries = catalog.filter(([, source]) => source.includes('|03[|14'));
+  assert.ok(entries.length > 30);
+  for (const [key] of entries) {
+    const frame = ui(undefined, key, { NUMBER: 1, KEY: 'E', VALUE1: 'Main menu' });
+    const text = plainText(frame);
+    const remote = terminal(String(frame), { modernColors: false });
+    let localOutput = '';
+    new LocalTerminal({ write: value => { localOutput += value; } }).write(frame);
+    const local = rgbTerminal(localOutput);
+    for (const match of text.matchAll(/\[([^\]]+)\]/g)) {
+      const first = match.index, last = first + match[0].length - 1;
+      for (const offset of [first, last]) {
+        assert.equal(remote.cells[Math.floor(offset / 80)][offset % 80].fg, 6, key);
+        assert.equal(local.cells[Math.floor(offset / 80)][offset % 80].fg, '#00aaaa', key);
+      }
+      const attack = key === 'doors_action_menu' && match[1] === 'A ID';
+      assert.equal(remote.cells[Math.floor((first + 1) / 80)][(first + 1) % 80].fg, attack ? 9 : 11, key);
+      assert.equal(local.cells[Math.floor((first + 1) / 80)][(first + 1) % 80].fg, attack ? '#ff5555' : '#ffff55', key);
+    }
+  }
 });
 
 test('editable templates interpret colors only before sanitized one-pass value substitution', t => {
@@ -195,7 +220,7 @@ test('templates reject oversized, expanding, non-regular and unsafe terminal inp
   const path = directory(t);
   for (const source of ['a'.repeat(16385), '%USERNAME%'.repeat(300),
     '\x1b]0;title\x07', '\xff', '\t', '\ufeffhello', '\x1b[6n']) {
-    writeTemplate(path, 'main', source);
+    writeTemplate(path, 'main', source === '\xff' ? Buffer.from([255]) : source);
     assert.throws(() => new Presentation(path), InputError);
   }
   rmSync(join(path, 'main.ans'));
@@ -220,30 +245,99 @@ test('display strings preserve prompt spacing, validate keys and reset defaults'
   assert.equal(displayString(store, 'main_prompt'), '|11Main command: |07');
 });
 
-test('legacy templates reject unknown codes, unsafe controls and malformed metadata', t => {
+test('all artwork templates reject unknown codes, unsafe controls and malformed metadata', t => {
   const path = directory(t);
-  for (const value of ['~XY', '\x1b]0;title\x07', '\t', '\ufeffBOM', '\xff']) {
-    writeTemplate(path, 'login', value === '\xff' ? Buffer.from([255]) : value);
-    assert.throws(() => new Presentation(path), InputError);
-  }
   const record = Buffer.alloc(128);
   record.write('SAUCE00');
   record[104] = 1;
-  writeTemplate(path, 'login', Buffer.concat([Buffer.from('art\x1a'), record]));
-  assert.throws(() => new Presentation(path), /Invalid SAUCE/);
+  for (const screen of screenTokens.keys()) {
+    for (const value of ['~XY', '\x1b]0;title\x07', '\t', '\x7f', '\x1b[6n', '\ufeffBOM', '\xff']) {
+      writeTemplate(path, screen, value === '\xff' ? Buffer.from([255]) : value);
+      assert.throws(() => new Presentation(path), InputError);
+    }
+    writeTemplate(path, screen, Buffer.concat([Buffer.from('art\x1a'), record]));
+    assert.throws(() => new Presentation(path), /Invalid SAUCE/);
+    rmSync(join(path, `${screen}.ans`));
+  }
 });
 
-test('legacy templates preserve CP437 bytes while stripping valid SAUCE, EOF and NUL padding', t => {
+test('all artwork templates preserve CP437 bytes while stripping valid SAUCE, EOF and NUL padding', t => {
   const path = directory(t);
   const record = Buffer.alloc(128);
   record.write('SAUCE00');
-  const source = Buffer.from([0x1b, 0x5b, 0x33, 0x36, 0x6d, 0xdb, 0xb0, 0x00, 0x0a, 0x1a]);
-  writeTemplate(path, 'welcome', Buffer.concat([source, record]));
-  const rendered = new Presentation(path).render('welcome', '');
-  assert.ok(rendered.includes('\xdb\xb0\r\n'));
-  assert.ok(!rendered.includes('SAUCE00'));
-  assert.ok(!rendered.includes('\x1a'));
-  assert.ok(!rendered.includes('\0'));
+  const source = Buffer.from([0x58, 0x0a, 0x1b, 0x5b, 0x33, 0x36, 0x6d, 0xdb, 0xb0, 0xb2, 0x00, 0x0a, 0x1a]);
+  for (const screen of screenTokens.keys()) {
+    writeTemplate(path, screen, Buffer.concat([source, record]));
+    const rendered = new Presentation(path).render(screen, '');
+    assert.ok(rendered.includes('\xdb\xb0\xb2'), screen);
+    assert.ok(rendered.includes('\r\n'), screen);
+    assert.ok(!rendered.includes('SAUCE00'));
+    assert.ok(!rendered.includes('\x1a'));
+    assert.ok(!rendered.includes('\0'));
+  }
+});
+
+test('login highlights preserve borders across color-separated padding on local and classic clients', t => {
+  const path = directory(t);
+  const lines = Array(22).fill('\x1b[0;32;40m' + '\xb2'.repeat(80));
+  for (let index = 0; index < loginChoices.length; index++) {
+    lines[index + 4] = '\x1b[0;1;32;42m' + '\xdb'.repeat(5) + '\x1b[0;37;40m ' +
+      `~0${index + 1}    \x1b[0;90;40m  \x1b[0;97;40m` + ' '.repeat(18) +
+      '\x1b[0;1;32;42m' + '\xdb'.repeat(4) + '\x1b[0m';
+  }
+  const source = lines.join('\r\n') + '\r\n\r\n\x1b[0m \r\n'.repeat(5);
+  writeTemplate(path, 'loginmatrix', Buffer.from(source, 'latin1'));
+  const presentation = new Presentation(path);
+  const reference = terminal(lines.join('\r\n'));
+  const view = { presentation, values: {}, strings: { selection: 'Selection: ' } };
+  for (let selected = 0; selected < loginChoices.length; selected++) {
+    const frame = loginMatrix('Test', false, view, selected);
+    for (const immediate of [false, true]) {
+      const rendered = terminal(frame, { immediate, modernColors: false, wrapControl: false,
+        brightBackground: false, inverseControl: false });
+      assert.equal(rendered.scrolls, 0);
+      for (let row = 0; row < 22; row++) {
+        for (let column = 0; column < 80; column++) {
+          const index = row - 4;
+          const label = loginChoices[index]?.[1];
+          if (label && column >= 6 && column < 6 + label.length) {
+            assert.deepEqual(rendered.cells[row][column], {
+              char: label[column - 6], fg: index === selected ? 15 : 7, bg: index === selected ? 4 : 0
+            });
+          } else {
+            assert.deepEqual(rendered.cells[row][column], reference.cells[row][column], `art cell ${row + 1},${column + 1}`);
+          }
+        }
+      }
+    }
+    let localOutput = '';
+    const local = new LocalTerminal({ write: text => { localOutput += text; } });
+    local.write(frame);
+    const localScreen = rgbTerminal(localOutput);
+    assert.equal(localScreen.scrolls, 0);
+    for (let index = 0; index < loginChoices.length; index++) {
+      const row = localScreen.cells[index + 4];
+      assert.equal(row[6].fg, index === selected ? '#ffffff' : '#aaaaaa');
+      assert.equal(row[6].bg, index === selected ? '#0000aa' : '#000000');
+      assert.deepEqual(row.slice(33, 37).map(cell => [cell.char, cell.fg, cell.bg]),
+        Array.from({ length: 4 }, () => [terminalText('\xdb'), '#55ff55', '#00aa00']));
+    }
+  }
+});
+
+test('login labels clip to blank artwork space and the screen edge instead of moving glyphs', t => {
+  const path = directory(t);
+  writeTemplate(path, 'loginmatrix', '\x1b[1;1H~02 \x1b[0;1;32;42mX\x1b[2;75H~01   ');
+  const presentation = new Presentation(path);
+  const frame = presentation.render('loginmatrix', '', {}, 1);
+  const screen = terminal(frame, { modernColors: false, inverseControl: false });
+  assert.equal(screen.cells[0].slice(0, 4).map(cell => cell.char).join(''), 'Appl');
+  assert.deepEqual(screen.cells[0][4], { char: 'X', fg: 10, bg: 2 });
+  assert.equal(screen.cells[1].slice(74, 79).map(cell => cell.char).join(''), 'Login');
+  const fallback = terminal(loginMatrix('Test', false, undefined, 1), { inverseControl: false });
+  const selectedRow = fallback.cells.find(row => row.map(cell => cell.char).join('').includes('[N] Apply'));
+  assert.equal(selectedRow[2].fg, 15);
+  assert.equal(selectedRow[2].bg, 4);
 });
 
 test('bundled ANSI examples fit 80 columns at maximum field lengths', () => {
@@ -266,8 +360,9 @@ test('bundled legacy-style examples expand only allowed tokens and preserve sele
   const art = new Presentation(samples);
   const matrix = art.render('loginmatrix', '', {}, 1);
   assert.ok(matrix.includes('Apply for an account'));
-  assert.equal(terminal(matrix).cells[5][53].fg, 0);
-  assert.equal(terminal(matrix).cells[5][53].bg, 15);
+  const [choiceRow, choiceColumn] = art.position('loginmatrix', '~02').slice(2, -1).split(';').map(Number);
+  assert.equal(terminal(matrix).cells[choiceRow - 1][choiceColumn - 1].fg, 15);
+  assert.equal(terminal(matrix).cells[choiceRow - 1][choiceColumn - 1].bg, 4);
   assert.ok(!matrix.includes('~01'));
   assert.ok(matrix.includes('NOCTURNO sample login matrix'));
   const login = art.render('login', '', { LOGINSTATUS: 'Checking', LOGINHELP: 'Safe help' });
@@ -352,7 +447,7 @@ test('main artwork and generated fallback default to Messages with matching grid
     { immediate: true, modernColors: false, wrapControl: false });
   assert.equal(fallback.scrolls, 0);
   for (const [frame, label] of [
-    [mainMenu('Test', 'Caller', 1), '[M] message menu'],
+    [mainMenu('Test', 'Caller', 1), '[M] Message Menu'],
     [new Presentation(samples).render('main-new', '', {}), 'message menu']
   ]) {
     const result = terminal(frame, { modernColors: false });
@@ -398,9 +493,10 @@ test('every main lightbar selection has DOS-safe contrast without modifying surr
   const reference = terminal(source);
   const view = { presentation, values: {}, strings: { main_prompt: 'Main command: ' } };
   const labels = mainChoices.map(([, label]) => {
-    const row = reference.cells.findIndex(line => line.map(cell => cell.char).join('').includes(label));
-    const column = reference.cells[row].map(cell => cell.char).join('').indexOf(label);
-    return { label, row, column };
+    const row = reference.cells.findIndex(line => line.map(cell => cell.char).join('').toLowerCase().includes(label.toLowerCase()));
+    const text = reference.cells[row].map(cell => cell.char).join('');
+    const column = text.toLowerCase().indexOf(label.toLowerCase());
+    return { label: text.slice(column, column + label.length), row, column };
   });
   const widths = [0, 1, 2].map(column =>
     Math.max(...mainChoiceGrid.map(row => row[column] === null ? 0 : mainChoices[row[column]][1].length)) + 2);
@@ -436,6 +532,42 @@ test('every main lightbar selection has DOS-safe contrast without modifying surr
         }
       }
     }
+  }
+});
+
+test('main artwork matches every label case-insensitively and preserves its original lettering', t => {
+  const path = directory(t);
+  for (const style of [
+    label => label.toLowerCase(),
+    label => label.toUpperCase(),
+    label => label,
+    label => [...label].map((letter, index) => index % 2 ? letter.toUpperCase() : letter.toLowerCase()).join('')
+  ]) {
+    const labels = mainChoices.map(([, label]) => style(label));
+    const source = mainChoiceGrid.map(row => row.map(index => index === null ? ' '.repeat(25) :
+      ` \x1b[32m${labels[index]}${' '.repeat(24 - labels[index].length)}`).join('')).join('\r\n');
+    writeTemplate(path, 'main-new', source);
+    const presentation = new Presentation(path);
+    const reference = terminal(source);
+    for (let selected = 0; selected < mainChoices.length; selected++) {
+      const rendered = terminal(presentation.render('main-new', '', {}, selected), { modernColors: false });
+      assert.equal(rendered.scrolls, 0);
+      for (const [index, label] of labels.entries()) {
+        const row = mainChoiceGrid.findIndex(items => items.includes(index));
+        const column = mainChoiceGrid[row].indexOf(index) * 25 + 1;
+        assert.deepEqual(rendered.cells[row].slice(column, column + label.length),
+          [...label].map(char => ({ char, fg: index === selected ? 15 : 8, bg: index === selected ? 4 : 0 })));
+        assert.equal(reference.cells[row][column].char, rendered.cells[row][column].char);
+      }
+    }
+  }
+});
+
+test('generated main menu defaults use proper capitalization, including acronyms', () => {
+  const frame = plainText(mainMenu('Test', 'Caller', 1));
+  for (const [key, label] of mainChoices) assert.ok(frame.includes(`[${key}] ${label}`));
+  for (const label of ['Email', 'User Config', 'Message Menu', 'QWK Mail Menu', 'BBS List', 'Note to Sysop']) {
+    assert.ok(frame.includes(label));
   }
 });
 

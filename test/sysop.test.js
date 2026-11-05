@@ -41,6 +41,80 @@ function setup(t, { rows } = {}) {
     output: () => output, quits: () => quits };
 }
 
+for (const rows of [24, 25]) {
+  test(`${rows}-row limits menus expose confirmed defaults, overrides and inheritance`, t => {
+    const f = setup(t, { rows }), { console, store } = f;
+    console.handle('S'); console.handle('G');
+    assert.equal(console.view, 'limits');
+    assert.equal(console.shortcuts(), '12Q');
+    console.handle('1'); console.handle('3');
+    assert.equal(store.limits.defaults().download_ratio, 0);
+    console.handle('NO');
+    assert.equal(store.limits.defaults().download_ratio, 0);
+    console.handle('1'); console.handle('3'); console.handle('YES');
+    console.handle('2'); console.handle('60'); console.handle('YES');
+    assert.deepEqual({ ...store.limits.defaults() }, { download_ratio: 3, daily_minutes: 60 });
+    console.handle('Q'); console.handle('U'); console.handle(String(f.userId));
+    assert.ok(console.shortcuts().includes('L'));
+    console.handle('L');
+    assert.equal(console.view, 'user-limits');
+    let screen = terminal(f.output(), { rows });
+    assert.match(screen.text, /Inherit \(3:1\)/);
+    assert.match(screen.text, /Inherit \(60 minutes\)/);
+    console.handle('1'); console.handle('0'); console.handle('YES');
+    assert.equal(store.limits.resolve(f.userId).download_ratio, 0);
+    console.handle('1'); console.handle('-'); console.handle('YES');
+    assert.equal(store.limits.resolve(f.userId).download_ratio, 3);
+    console.handle('2'); console.handle('1441');
+    assert.ok(console.field);
+    assert.equal(store.limits.resolve(f.userId).daily_minutes, 60);
+    console.handle('/ABORT');
+    screen = terminal(f.output(), { rows });
+    assert.match(screen.text, /Download \/ approved upload bytes/);
+    assert.match(screen.text, /Approved upload bytes:/);
+    assert.equal(screen.scrolls, 0);
+    console.handle('Q');
+    assert.equal(console.view, 'user-detail');
+    console.handle('Q');
+    assert.equal(console.view, 'users');
+    assert.deepEqual(f.errors, []);
+  });
+
+  test(`${rows}-row board moderation confirms toggles, reviews and rejects pending posts`, t => {
+    const f = setup(t, { rows }), { console, store } = f;
+    console.handle('B'); console.handle('M');
+    assert.equal(store.moderation(1), false);
+    console.handle('NO');
+    assert.equal(store.moderation(1), false);
+    console.handle('M'); console.handle('YES');
+    const pending = store.post(f.userId, 'Queued subject', 'Queued body');
+    console.handle('T');
+    assert.equal(console.view, 'pending-messages');
+    let screen = terminal(f.output(), { rows });
+    assert.match(screen.text, /Queued subject/);
+    assert.doesNotMatch(screen.text, /Test subject/);
+    console.handle(String(pending));
+    screen = terminal(f.output(), { rows });
+    assert.match(screen.text, /Queued body/);
+    console.handle('Q');
+    assert.equal(console.view, 'pending-messages');
+    console.handle(`A ${pending}`);
+    assert.equal(store.access.message(f.userId, pending, 1), undefined);
+    console.handle('NO');
+    assert.equal(store.isMessagePending(pending), true);
+    console.handle(`A ${pending}`); console.handle('YES');
+    assert.equal(store.access.message(f.userId, pending, 1).subject, 'Queued subject');
+    const rejected = store.post(f.userId, 'Rejected subject', 'Rejected body');
+    console.handle(`R ${rejected}`); console.handle('YES');
+    assert.equal(store.message(rejected), undefined);
+    console.handle('Q'); console.handle('M'); console.handle('YES');
+    assert.equal(store.moderation(1), false);
+    screen = terminal(f.output(), { rows });
+    assert.equal(screen.scrolls, 0);
+    assert.deepEqual(f.errors, []);
+  });
+}
+
 test('WFC routes to every working menu and returns without quitting', t => {
   const fixture = setup(t);
   const { console } = fixture;

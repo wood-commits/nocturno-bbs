@@ -130,6 +130,7 @@ export class Access {
         (permission === 'doors' && (!user.can_doors || !role.can_doors))) {
       throw new InputError('access_denied');
     }
+    this.store.limits.checkTime(userId);
     return user;
   }
 
@@ -196,7 +197,7 @@ export class Access {
   message(userId, messageId, baseId) {
     this.requireMessage(userId, baseId);
     const row = this.store.message(messageId);
-    return row?.base_id === baseId ? row : undefined;
+    return row?.base_id === baseId && !this.store.isMessagePending(messageId) ? row : undefined;
   }
 
   fileBase(id) {

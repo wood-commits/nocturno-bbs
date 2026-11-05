@@ -80,8 +80,8 @@ function bodyPage(body, page) {
     pages: Math.max(1, Math.ceil(lines.length / 14)), page };
 }
 
-function output(session, lines, frame = '') {
-  session.write(frame + lines.map(safeText).join('\r\n') + '\r\n');
+function output(session, lines, prompt = '', frame = '') {
+  session.write(frame + (lines.length ? lines.map(safeText).join('\r\n') + '\r\n' : '') + safeText(prompt));
 }
 
 export class Community {
@@ -285,7 +285,7 @@ export class Community {
     const user = this.enabled(userId);
     return { id: user.id, handle: user.handle, created_at: user.created_at, last_login: user.last_login,
       calls: this.db.prepare('SELECT calls FROM community_call_counts WHERE user_id = ?').get(userId)?.calls ?? 0,
-      posts: this.db.prepare('SELECT count(*) AS n FROM messages WHERE user_id = ? AND removed = 0').get(userId).n };
+      posts: this.db.prepare('SELECT count(*) AS n FROM messages WHERE user_id = ? AND removed = 0 AND pending = 0').get(userId).n };
   }
 
   stats(userId) {
@@ -303,8 +303,8 @@ export class Community {
     if (feature === 'note' || feature === 'page') {
       session.communityState.body = [];
       output(session, [feature === 'note' ? ui(this.store, 'community_private_note_to_local_sysop_end_with_abort_cancels') :
-        ui(this.store, 'community_page_request_local_console_notification_only_no_live_chat_one_'),
-      feature === 'note' ? ui(this.store, 'community_note_line') : ui(this.store, 'community_reason_160_characters_abort_cancels')],
+        ui(this.store, 'community_page_request_local_console_notification_only_no_live_chat_one_')],
+      feature === 'note' ? ui(this.store, 'community_note_line') : ui(this.store, 'community_reason_160_characters_abort_cancels'),
       heading(uiText(this.store, feature.toUpperCase()), this.store.settings().name));
     } else this.show(session, notice);
   }
@@ -347,14 +347,13 @@ export class Community {
           DOWNLOADS: transfers.downloads, ACCESS: ui(this.store, 'community_approved_caller'), USERNOTE: stats.user_note
         }).values));
         output(session, [ui(this.store, 'community_calls_value_public_posts_value', { CALLS: stats.calls, POSTS: stats.posts }),
-          ui(this.store, 'community_mail_sent_value_received_value_unread_value', { MAIL_SENT: stats.mail_sent, MAIL_RECEIVED: stats.mail_received, UNREAD: stats.unread }),
-          ui(this.store, 'community_q_main_command')]);
+          ui(this.store, 'community_mail_sent_value_received_value_unread_value', { MAIL_SENT: stats.mail_sent, MAIL_RECEIVED: stats.mail_received, UNREAD: stats.unread })],
+          ui(this.store, 'community_q_main_command'));
         return;
       }
     }
     if (notice) lines.push(notice);
-    lines.push(ui(this.store, 'command_prompt'));
-    output(session, lines, frame);
+    output(session, lines, ui(this.store, 'command_prompt'), frame);
   }
 
   returnMain(session) {
@@ -381,7 +380,7 @@ export class Community {
       await this.command(session, line, command);
     } catch (error) {
       if (!(error instanceof InputError)) throw error;
-      output(session, [errorText(this.store, error), ui(this.store, 'retry_prompt')]);
+      output(session, [errorText(this.store, error)], ui(this.store, 'retry_prompt'));
     }
     return true;
   }
@@ -405,7 +404,7 @@ export class Community {
           throw new InputError('Maximum 50 lines / 4096 characters. End with . or /abort.');
         }
         data.body.push(line);
-        output(session, [ui(this.store, 'community_next_line_ends')]);
+        output(session, [], ui(this.store, 'community_next_line_ends'));
       }
       return;
     }
@@ -430,7 +429,7 @@ export class Community {
         }
         data.recipientId = recipient.id;
         data.step = 'mail-subject';
-        output(session, [ui(this.store, 'community_subject_60_characters')]);
+        output(session, [], ui(this.store, 'community_subject_60_characters'));
         return;
       }
       if (data.step === 'mail-subject') {
@@ -447,7 +446,7 @@ export class Community {
       else if (data.step === 'bbs-name') {
         data.bbsName = text(line, 40, ui(this.store, 'community_bbs_name'));
         data.step = 'bbs-address';
-        output(session, [ui(this.store, 'community_address_100_printable_characters')]);
+        output(session, [], ui(this.store, 'community_address_100_printable_characters'));
         return;
       } else if (data.step === 'bbs-address') this.addBbs(userId, data.bbsName, line);
       else throw new Error('Invalid community editor state');
@@ -464,20 +463,20 @@ export class Community {
     } else if (data.feature === 'email' && command === 'W') {
       this.enabled(userId, true);
       data.step = 'mail-handle';
-      output(session, [ui(this.store, 'community_recipient_handle')]);
+      output(session, [], ui(this.store, 'community_recipient_handle'));
       return;
     } else if (data.feature === 'config' && ['R', 'L', 'N'].includes(command)) {
       data.field = command === 'R' ? 'real_name' : command === 'L' ? 'location' : 'user_note';
       data.step = 'profile';
-      output(session, [ui(this.store, 'community_private_value_60_characters_clears_abort_cancels')]);
+      output(session, [], ui(this.store, 'community_private_value_60_characters_clears_abort_cancels'));
       return;
     } else if ((data.feature === 'signature' && command === 'E') ||
       (data.feature === 'automessage' && command === 'W') ||
       (['bbs', 'oneliners'].includes(data.feature) && command === 'A')) {
       this.enabled(userId, true);
       data.step = data.feature === 'bbs' ? 'bbs-name' : data.feature;
-      output(session, [data.feature === 'bbs' ? ui(this.store, 'community_bbs_name_40_characters') :
-        ui(this.store, 'community_text_signature_automessage_160_oneliner_120_clears_signature_a')]);
+      output(session, [], data.feature === 'bbs' ? ui(this.store, 'community_bbs_name_40_characters') :
+        ui(this.store, 'community_text_signature_automessage_160_oneliner_120_clears_signature_a'));
       return;
     } else if (command !== '?') throw new InputError('Unknown community command.');
     this.show(session);
@@ -500,7 +499,7 @@ export class Community {
       return;
     }
     data.readPages = row.pages;
-    output(session, [...header, ...row.body_lines, ui(this.store, 'community_n_p_pages_q_inbox')],
+    output(session, [...header, ...row.body_lines], ui(this.store, 'community_n_p_pages_q_inbox'),
       heading(ui(this.store, 'community_private_mail'), this.store.settings().name));
   }
 }

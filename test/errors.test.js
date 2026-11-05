@@ -1,9 +1,72 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
-import { reportError } from '../src/errors.js';
+import { reportError, reportStartupError } from '../src/errors.js';
 import { createBbs } from '../src/server.js';
 import { Store } from '../src/store.js';
+import { InputError } from '../src/validation.js';
+import { config } from '../src/config.js';
+
+test('startup diagnostics identify known configuration failures without logging values', t => {
+  let output = '';
+  t.mock.method(process.stderr, 'write', data => { output += data; return true; });
+  for (const [env, expected] of [
+    [{ BBS_PORT: 'private-port-value' }, 'BBS_PORT and BBS_TLS_PORT must be integers'],
+    [{ BBS_TLS_CERT: 'private-certificate-path' }, 'Set both BBS_TLS_CERT and BBS_TLS_KEY'],
+    [{ BBS_NAME: 'private-name\x1b[2J' }, 'BBS_NAME must contain 1-40'],
+    [{ BBS_MCP_TOKEN: 'private-token' }, '64 randomly generated hexadecimal characters']
+  ]) {
+    output = '';
+    assert.throws(() => config(env), error => {
+      reportStartupError(error, 'configuration');
+      return true;
+    });
+    assert.ok(output.includes('Startup stage: reading environment configuration'));
+    assert.ok(output.includes(expected));
+    assert.ok(!output.includes('private-'));
+    assert.ok(!output.includes('\x1b'));
+  }
+});
+
+test('startup artwork diagnostics name only allowlisted screens and reasons', t => {
+  let output = '';
+  t.mock.method(process.stderr, 'write', data => { output += data; return true; });
+  reportStartupError(new InputError('error_unsupported_placeholder_in_value_ans_value', {
+    SCREEN: 'main-new', VALUE2: 'PRIVATE_PASSWORD_TOKEN'
+  }), 'services');
+  assert.ok(output.includes('main-new.ans: An unsupported placeholder'));
+  assert.ok(output.includes('ANSI.md'));
+  assert.ok(!output.includes('PRIVATE_PASSWORD_TOKEN'));
+  output = '';
+  reportStartupError(new InputError('error_unsupported_ansi_controls_value_ans', {
+    SCREEN: 'private-path\x1b[2J'
+  }), 'services');
+  assert.ok(output.includes('Unsupported terminal controls'));
+  assert.ok(!output.includes('private-path'));
+  assert.ok(!output.includes('\x1b'));
+});
+
+test('unknown startup failures keep raw messages, stacks, paths and stage values private', t => {
+  let output = '';
+  t.mock.method(process.stderr, 'write', data => { output += data; return true; });
+  const error = new Error('private-message\x1b]52;password\x07');
+  error.stack = 'private-stack';
+  error.path = 'private-path';
+  reportStartupError(error, 'private-stage\x1b[2J');
+  assert.ok(output.includes('[BBS error: Error]'));
+  assert.ok(output.includes('Startup stage: initializing the BBS'));
+  assert.ok(!output.includes('private-'));
+  assert.ok(!output.includes('\x1b'));
+  output = '';
+  reportStartupError({ code: 'EADDRINUSE', message: 'private-message' }, 'services');
+  assert.ok(output.includes('already in use'));
+  assert.ok(!output.includes('private-message'));
+  output = '';
+  reportStartupError({ code: 'ERR_SQLITE_ERROR', message: 'private-database-content' }, 'database');
+  assert.ok(output.includes('opening the SQLite database'));
+  assert.ok(output.includes('SQLite initialization failed'));
+  assert.ok(!output.includes('private-database-content'));
+});
 
 test('shared error reporter bounds diagnostics and never logs messages, stacks or terminal controls', t => {
   const output = [];

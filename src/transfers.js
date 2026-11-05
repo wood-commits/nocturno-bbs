@@ -107,9 +107,7 @@ export class Transfers {
   approve(id, approved = true) {
     id = idNumber(id);
     if (typeof approved !== 'boolean') throw new InputError('Invalid approval value.');
-    if (!this.store.db.prepare('UPDATE transfer_files SET approved = ? WHERE id = ? AND removed = 0').run(Number(approved), id).changes) {
-      throw new InputError('File not found.');
-    }
+    this.store.limits.approveUpload(id, approved);
   }
 
   remove(id) {
@@ -167,6 +165,7 @@ export class Transfers {
       WHERE id = ? AND approved = 1 AND removed = 0`).get(idNumber(id));
     if (!row) throw new InputError('Approved file not found.');
     this.store.access.requireFile(userId, row.base_id, 'download');
+    this.store.limits.checkDownload(userId, row.size);
     filename(row.name);
     this.ensureDirectory();
     const path = this.storagePath(row.storage_key);
@@ -196,17 +195,23 @@ export class Transfers {
   qwk(userId) { return buildQwk(this.store, this.caller(userId)); }
 
   importReplies(userId, packet) {
+    return this.importReplyPacket(userId, packet).count;
+  }
+
+  importReplyPacket(userId, packet) {
     this.caller(userId, true);
     const rows = parseReplies(packet);
+    let queued = 0;
     this.store.db.exec('BEGIN IMMEDIATE');
     try {
       this.caller(userId, true);
       for (const row of rows) {
         if (!this.store.base(row.baseId)) throw new InputError('Reply message base not found.');
-        this.store.post(userId, row.subject, row.body, row.baseId);
+        const id = this.store.post(userId, row.subject, row.body, row.baseId);
+        if (this.store.isMessagePending(id)) queued++;
       }
       this.store.db.exec('COMMIT');
-      return rows.length;
+      return { count: rows.length, queued };
     } catch (error) {
       this.store.db.exec('ROLLBACK');
       throw error;
@@ -292,6 +297,7 @@ export class Transfers {
         WHERE role_id = ? AND can_read = 1`).all(this.store.access.caller(session.user.id).role_id).map(row => row.base_id) : [],
       received: 0, started: Date.now(), lastActivity: Date.now() };
     this.checkJob(session, job);
+    if (kind === 'download') this.store.limits.consumeDownload(session.user.id, file.data.length);
     const write = buffer => {
       this.checkJob(session, job);
       if (typeof session.writeBinary === 'function') session.writeBinary(buffer);
@@ -308,8 +314,11 @@ export class Transfers {
         let message = ui(this.store, 'transfer_download_complete');
         if (kind === 'upload') message = ui(this.store, 'transfer_upload_complete',
           { FILEID: this.save(session.user.id, result.name, result.data, '', job.baseId) });
-        if (kind === 'reply') message = ui(this.store, 'transfer_replies_complete',
-          { COUNT: this.importReplies(session.user.id, result.data) });
+        if (kind === 'reply') {
+          const imported = this.importReplyPacket(session.user.id, result.data);
+          message = ui(this.store, imported.queued ? 'moderation_replies_complete' : 'transfer_replies_complete',
+            { COUNT: imported.count, QUEUED: imported.queued });
+        }
         if (kind === 'download') {
           this.store.db.prepare(`INSERT INTO transfer_downloads(user_id, downloads) VALUES (?, 1)
             ON CONFLICT(user_id) DO UPDATE SET downloads = min(999999999, downloads + 1)`).run(session.user.id);
@@ -348,6 +357,7 @@ export class Transfers {
         WHERE id = ? AND base_id = ? AND approved = 1 AND removed = 0`).get(job.fileId, job.baseId)) {
         throw new InputError('Approved file not found.');
       }
+      if (job.kind === 'download') this.store.limits.checkDownload(session.user.id);
     }
     for (const baseId of job.messageBases) this.store.access.requireMessage(session.user.id, baseId);
   }

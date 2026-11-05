@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { cpSync, existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import net from 'node:net';
@@ -136,6 +136,45 @@ test('executable rejects invalid operator configuration without opening a listen
   const [code] = await once(child, 'exit');
   assert.equal(code, 1);
   assert.ok(errors.includes('[BBS error: Error]'));
+  assert.ok(errors.includes('Startup stage: reading environment configuration'));
+  assert.ok(errors.includes('BBS_PORT and BBS_TLS_PORT must be integers'));
+});
+
+test('startup artwork failures identify the template without logging its content', { timeout: 10000 }, async t => {
+  const directory = mkdtempSync(join(tmpdir(), 'nocturno-startup-error-'));
+  for (const name of ['src', 'examples', 'package.json']) {
+    cpSync(new URL(`../${name}`, import.meta.url), join(directory, name), { recursive: true });
+  }
+  // Fixed template names inside an isolated temporary checkout.
+  // eslint-disable-next-line security/detect-non-literal-fs-filename
+  mkdirSync(join(directory, 'ansi'));
+  // eslint-disable-next-line security/detect-non-literal-fs-filename
+  writeFileSync(join(directory, 'ansi', 'compose.ans'), '\x1b]52;private-artwork-content\x07');
+  const child = spawn(process.execPath, [join(directory, 'src', 'index.js')], {
+    cwd: directory,
+    env: { ...process.env, ...noMcp, BBS_NAME: 'Test', BBS_PORT: '2323',
+      BBS_DATA_DIR: join(directory, 'data'), BBS_DASHBOARD: '0', BBS_TLS_CERT: '', BBS_TLS_KEY: '' },
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+  t.after(async () => {
+    if (child.exitCode === null && child.signalCode === null) {
+      const closed = once(child, 'close');
+      child.kill();
+      await closed;
+    }
+    rmSync(directory, { recursive: true, force: true });
+  });
+  let errors = '', output = '';
+  child.stderr.on('data', data => { errors += data; });
+  child.stdout.on('data', data => { output += data; });
+  const [code] = await once(child, 'close');
+  assert.equal(code, 1);
+  assert.ok(errors.includes('Startup stage: initializing BBS artwork, authentication and listeners'));
+  assert.ok(errors.includes('compose.ans: Unsupported terminal controls'));
+  assert.ok(errors.includes('ANSI.md'));
+  assert.ok(!errors.includes('private-artwork-content'));
+  assert.ok(!errors.includes('\x1b'));
+  assert.ok(!output.includes('Waiting for callers:'));
 });
 
 test('interactive Ctrl+C restores the console and exits without closing stdin externally', { timeout: 10000 }, async t => {

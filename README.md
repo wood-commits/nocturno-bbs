@@ -50,6 +50,12 @@ or [Connecting through an SSH tunnel](#connecting-through-an-ssh-tunnel).
 The renderer translates bright foreground colors to classic ANSI intensity
 codes and protects full-width artwork from column-80 wrapping. The login
 matrix retains its banner and all 22 artwork rows above the two-line footer.
+Login choices use explicit white-on-blue selection and gray-on-black inactive
+colors, including on clients without reverse-video support. Labels consume only
+adjacent blank artwork space across color changes and clip rather than moving
+nearby glyphs or wrapping past the screen edge.
+Trailing blank export rows are removed from login/main lightbar artwork to
+prevent scrolling before the fixed footer is drawn.
 The main lightbar uses white-on-blue selection and clears the artwork's sample
 highlight on inactive items. Each column's bar matches its longest label plus
 one blank on either side, without moving the artwork's labels. Its prompt stays
@@ -60,10 +66,17 @@ It initially selects **Messages (M)**, the first option in the left column.
 Returning from a section, help or artwork restores that caller's last selected
 main-menu item, including actions opened with letter shortcuts. The generated
 fallback uses the same grid and selection colors as the artwork.
+Main artwork label matching is case-insensitive and preserves the artwork's
+lettering. Generated menus and `?` help use capitalized names such as
+**Message Menu**, **QWK Mail Menu** and **BBS List**.
 Section menus and page redraws clear the previous screen and use colored
 headers/prompts; community and file/QWK menus use the same frame as the classic
 lists. Text-entry steps and validation retries remain inline so they retain
 their context. Door-game redraws also clear before displaying their content.
+Community menu, field and retry prompts leave the input cursor immediately after
+the prompt; only completed content lines end with CRLF. Default shortcut brackets
+use normal cyan, with bright keys and gray labels. Saved display-string overrides
+retain their own colors.
 Choose `N` to apply, `C` to check an application, or `L` to log on.
 New applications require local sysop approval; existing accounts stay approved.
 Application checks require the handle and password and do not log the applicant in.
@@ -97,6 +110,8 @@ no installed packages. Development dependencies are just lint/SAST tooling.
   sanitized per-screen placeholders,
   and a persistent local display-string editor. See [ANSI.md](ANSI.md) for
   filenames, supported placeholders, formats and examples.
+    All artwork templates accept DOS CP437 characters, including shading and
+    box-drawing glyphs, with the same bounded ANSI control validation.
 - CP437/SAUCE legacy artwork, per-screen tilde placeholders,
   lightbar login/main menus, and authenticated application status checks.
 - Original multiplayer **Frontier Realms** door: colorful command center,
@@ -385,6 +400,44 @@ Callers enter **M**, then **B** to choose a base by ID. Writing and reading
 use the selected base; message IDs remain globally unique. Caller base lists
 include only readable bases. Base deletion is not implemented.
 
+In a base's message list, **M**, then **YES**, toggles approval for new
+posts and replies. **T** opens the pending queue: enter an ID to read it,
+`A ID` to approve or `R ID` to reject, each with **YES** confirmation.
+`N/P` pages the queue; `Q` returns to the published list. Pending content is
+visible only to the local sysop console, never caller lists, reads, statistics
+or QWK exports. Rejection clears the content but reserves its ID. Turning
+moderation off does not publish already-pending posts. Existing posts stay
+published and existing/new bases start unmoderated. Normal account and base
+permissions still apply when submitting a post.
+
+### Caller ratios and daily time budgets
+
+Use **S, G** for global defaults, or **U, user ID, L** for one user's
+overrides. **1** edits the download/upload byte ratio (0-1000); **2** edits
+daily connection minutes (0-1440). Every change requires **YES**. Zero
+means unlimited; a user override of `-` inherits the global setting.
+Both global defaults initially disable limits. Settings persist in SQLite
+and apply live, including during authentication.
+
+A ratio of `3` permits three downloaded file bytes per approved uploaded byte.
+Only approved uploads earn credit, once; unapproval/removal does not revoke
+earned credit. Existing approved files seed credit on upgrade; historical
+download byte totals cannot be reconstructed and accounting starts at upgrade.
+Ordinary file downloads debit their full size **when started**, including
+canceled/failed transfers, so concurrent downloads and aborts cannot reuse
+credit. Completed-download statistics still count only successful transfers.
+QWK/REP packets and private mail do not earn or consume file-ratio credit.
+
+Daily time is cumulative across all simultaneous authenticated connections,
+including local login and MCP caller terminals, using UTC midnight boundaries.
+Usage is tracked even while unlimited, independently of pruned caller history.
+Exhausted accounts cannot start another call and active callers disconnect at
+exhaustion; idle/lifetime limits continue to apply independently. Active usage
+is checkpointed at least once per second (event-loop scheduling permitting),
+and on disconnect. Restarts retain checkpoints without charging offline
+downtime; an abrupt process loss can discard the final uncheckpointed interval.
+Moving the clock backward cannot reset the budget or charge an interval twice.
+
 ### Roles and base access
 
 Under **S, R**, use `C name` and **YES** to create a role (1-24 printable ASCII
@@ -573,7 +626,9 @@ posts; `U` receives a reply ZIP containing `NOCTURNO.MSG`. Replies require an
 approved, enabled account with global/per-user posting permission and read/post
 grants for every target base. Exported conference lists, indexes and bodies
 exclude inaccessible bases; callers with no readable bases cannot export.
-Imports are limited to 2 MiB / 100 replies and commit atomically.
+Imports are limited to 2 MiB / 100 replies and commit atomically; replies to
+moderated bases enter their pending queues just like online posts. Completion
+reports how many imported replies need approval.
 Private email is not included in QWK packets.
 Reply packets using the previous `NIGHTWIR.MSG` filename and matching board ID
 remain accepted, with the same account and access checks. New exports and
@@ -919,9 +974,10 @@ proxy, or reuse credentials from other systems.
   renderers and trusted local, allowlisted ANSI templates produce terminal escapes.
 - No HTTP server, shell execution, dynamic module loading, or user-chosen
   filesystem paths. Configuration is trusted local operator input.
-- Error logs contain only sanitized error codes, never passwords, raw commands,
-  caller-supplied ANSI, or database contents. The executable and the server's
-  default reporter share this policy; diagnostic codes are limited to 64 characters.
+- Runtime error logs contain only sanitized error codes, never passwords, raw commands,
+  caller-supplied ANSI, or database contents. The executable and server share this
+  reporter; diagnostic codes are limited to 64 characters. Startup adds only fixed
+  explanations and allowlisted template names, never raw error details.
   Custom `onError` callbacks receive the original error and must never log it raw.
 - Downloads open a payload once and validate its descriptor against the current
   non-symlink directory entry using exact device/inode identities before reading.
@@ -989,6 +1045,13 @@ once ESLint and `@eslint/config-array` require a patched version themselves.
 
 ## Troubleshooting
 
+Startup failures include the initialization stage and fixed, actionable reasons
+for recognized configuration, artwork and system errors. Invalid artwork names
+the allowlisted template (for example, `compose.ans`) and the validation rule.
+Unknown failures still include stage-specific checks. Raw error messages, stacks,
+file paths, artwork content and environment values are never dumped; runtime
+caller errors retain code-only logging.
+
 - `EADDRINUSE`: a configured port is occupied; stop the owning service or choose
   another port. Do not terminate unrelated processes.
 - `ENOENT` / TLS startup failure: check PEM paths, read permissions, matching
@@ -1005,7 +1068,8 @@ once ESLint and `@eslint/config-array` require a patched version themselves.
 - `src/auth.js`: hashing, verification, admission control and attempt limiter.
 - `src/store.js`: SQLite schema and parameterized persistence.
 - `src/session.js`: authenticated session state machine.
-- `src/screens.js`: original ANSI screens, lists and sysop dashboard.
+- `src/screens.js`: original ANSI screens, lists and sysop dashboard, with named
+  layout, field-width, timing and selection-color constants.
 - `src/presentation.js`, `ansi/`, `ANSI.md`: optional screen overrides, placeholders
   and editable string catalog.
 - `src/doors.js`: persistent original multiplayer realm game.

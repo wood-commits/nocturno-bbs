@@ -7,7 +7,10 @@ import { Store } from '../src/store.js';
 import { Community, initializeCommunity } from '../src/community.js';
 import { InputError } from '../src/validation.js';
 import { Presentation } from '../src/presentation.js';
-import { plainText } from '../src/strings.js';
+import { plainText, ui } from '../src/strings.js';
+import { LocalTerminal } from '../src/local-terminal.js';
+import { TelnetInput } from '../src/telnet.js';
+import { terminal } from './helpers/ansi-terminal.js';
 
 function setup(t, filename = ':memory:') {
   const store = new Store(filename);
@@ -25,6 +28,72 @@ function session(store, userId, node = 1) {
     menu() { this.state = 'main'; },
     showWelcome() { this.state = 'welcome'; } };
 }
+
+for (const feature of ['automessage', 'email', 'signature', 'config', 'stats', 'oneliners']) {
+  test(`${feature} menu leaves both local and remote cursors immediately after its prompt`, async t => {
+    const { store, community, alice } = setup(t);
+    const caller = session(store, alice);
+    await community.menu(caller, feature);
+    const prompt = plainText(ui(store, 'command_prompt'));
+    const render = (frame, local) => {
+      if (!local) return terminal(frame, { rows: 24 });
+      let output = '';
+      new LocalTerminal({ rows: 24, write: text => { output += text; } }).write(frame);
+      return terminal(output, { rows: 24 });
+    };
+    for (const local of [false, true]) {
+      const screen = render(caller.output, local);
+      const row = screen.cells.findLastIndex(line => line.map(cell => cell.char).join('').includes(prompt));
+      const column = screen.cells[row].map(cell => cell.char).join('').indexOf(prompt) + prompt.length;
+      assert.equal(screen.row, row);
+      assert.equal(screen.column, column);
+      const editor = new TelnetInput({ write: value => caller.write(value) });
+      editor.feed(Buffer.from('x'));
+      const entered = render(caller.output, local);
+      assert.equal(entered.cells[row][column].char, 'x');
+      caller.output = caller.output.slice(0, -1);
+    }
+    assert.ok(!caller.output.endsWith('\r\n'));
+  });
+}
+
+for (const artwork of [false, true]) {
+  test(`stats ${artwork ? 'artwork' : 'rendered fallback'} leaves the cursor after the command prompt`, async t => {
+    const { store, community, alice } = setup(t);
+    const caller = session(store, alice);
+    caller.presentation = new Presentation();
+    caller.presentation.templates.clear();
+    if (artwork) caller.presentation.templates.set('stats', 'STATS\r\n');
+    caller.view = values => ({ values });
+    await community.menu(caller, 'stats');
+    const prompt = plainText(ui(store, 'community_q_main_command'));
+    const screen = terminal(caller.output, { rows: 24 });
+    const row = screen.cells.findLastIndex(line => line.map(cell => cell.char).join('').includes(prompt));
+    const column = screen.cells[row].map(cell => cell.char).join('').indexOf(prompt) + prompt.length;
+    assert.equal(screen.row, row);
+    assert.equal(screen.column, column);
+    assert.ok(!caller.output.endsWith('\r\n'));
+  });
+}
+
+test('community field prompts and validation retries do not append a newline after input', async t => {
+  const { store, community, alice } = setup(t);
+  const caller = session(store, alice);
+  store.setString('retry_prompt', '|11Try again here: |07');
+  await community.menu(caller, 'config');
+  await community.handle(caller, 'R');
+  assert.ok(caller.output.endsWith(String(ui(store, 'community_private_value_60_characters_clears_abort_cancels'))));
+  await community.handle(caller, 'x'.repeat(61));
+  assert.ok(caller.output.endsWith(String(ui(store, 'retry_prompt'))));
+  const screen = terminal(caller.output, { rows: 24 });
+  assert.equal(screen.column, 'Try again here: '.length);
+  caller.output = '';
+  await community.menu(caller, 'email');
+  await community.handle(caller, 'W');
+  assert.ok(caller.output.endsWith(String(ui(store, 'community_recipient_handle'))));
+  await community.handle(caller, 'Bob');
+  assert.ok(caller.output.endsWith(String(ui(store, 'community_subject_60_characters'))));
+});
 
 test('private inbox ownership, read markers and projections exclude private fields', t => {
   const { store, community, alice, bob } = setup(t);

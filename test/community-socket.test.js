@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import net from 'node:net';
 import { once } from 'node:events';
-import { mkdirSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -10,6 +10,9 @@ import { Store } from '../src/store.js';
 import { createBbs } from '../src/server.js';
 import { hashPassword } from '../src/auth.js';
 import { Presentation } from '../src/presentation.js';
+import { plainText } from '../src/strings.js';
+import { tmpdir } from 'node:os';
+import { terminal } from './helpers/ansi-terminal.js';
 
 async function connect(port, errors) {
   const socket = net.connect({ host: '127.0.0.1', port });
@@ -24,7 +27,7 @@ async function connect(port, errors) {
     clear() { received = ''; },
     async wait(marker) {
       const deadline = Date.now() + (marker.includes('Press any key') ? 15000 : 5000);
-      while (!received.includes(marker)) {
+      while (!received.includes(marker) && !plainText(received).includes(marker)) {
         if (failure) throw failure;
         assert.ok(!socket.destroyed, `Socket closed waiting for ${marker}: ${received}\n${errors.map(error => error.stack).join('\n')}`);
         assert.ok(Date.now() < deadline, `Timed out waiting for ${marker}`);
@@ -36,8 +39,7 @@ async function connect(port, errors) {
       socket.write(`${line}\r\n`);
       await this.wait(marker);
     },
-    async login(handle) {
-      const form = new Presentation();
+    async login(handle, form = new Presentation()) {
       await this.wait('Selection:');
       await this.command('L', form.position('login', '~LN') ?? 'Handle (');
       await this.command(handle, form.position('login', '~LP') ?? 'input hidden');
@@ -49,6 +51,39 @@ async function connect(port, errors) {
   };
   return client;
 }
+
+test('real telnet community menus echo input at the prompt cursor', { timeout: 15000 }, async t => {
+  const directory = mkdtempSync(join(tmpdir(), 'nocturno-prompt-socket-'));
+  const store = new Store(':memory:');
+  const errors = [];
+  let bbs, caller;
+  t.after(async () => {
+    caller?.socket.destroy();
+    await bbs?.close();
+    store.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+  store.createUser('PromptCaller', await hashPassword('socket community password!'));
+  bbs = await createBbs({ store, port: 0, ansiDirectory: directory, onError: error => errors.push(error) });
+  caller = await connect(Number(bbs.endpoints[0].split(':').at(-1)), errors);
+  await caller.login('PromptCaller', new Presentation(directory));
+  for (const key of ['O', 'E', 'G', 'C', 'T', 'I']) {
+    await caller.command(key, 'Command:');
+    const frame = caller.text();
+    const before = terminal(frame, { rows: 24 });
+    const promptRow = before.cells.findLastIndex(row => row.map(cell => cell.char).join('').includes('Command: '));
+    const promptColumn = before.cells[promptRow].map(cell => cell.char).join('').indexOf('Command: ') + 'Command: '.length;
+    assert.equal(before.row, promptRow, key);
+    assert.equal(before.column, promptColumn, key);
+    caller.clear();
+    caller.socket.write('x');
+    await caller.wait('x');
+    const echoed = terminal(frame + caller.text(), { rows: 24 });
+    assert.equal(echoed.cells[promptRow][promptColumn].char, 'x', key);
+    await caller.command('\x7fQ', 'Main command:');
+  }
+  assert.deepEqual(errors, []);
+});
 
 test('real telnet community actions preserve privacy, account edits, signatures and local requests',
   { timeout: 20000 }, async t => {

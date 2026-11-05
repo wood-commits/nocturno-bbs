@@ -44,6 +44,43 @@ function session(f) {
   };
 }
 
+test('ZMODEM reply completion distinguishes imported and approval-queued messages', async t => {
+  const f = fixture(t), { store, user, transfers } = f;
+  store.setModeration(1, true);
+  const packet = rep([{ base_id: 1, subject: 'Offline moderated', body: 'Queued offline body', handle: 'Caller_1' }]);
+  const s = session(f);
+  t.after(() => transfers.cancel(s));
+  transfers.menu(s, 'qwk');
+  await transfers.handle(s, 'U');
+  transfers.feed(s, Buffer.concat([
+    zHeader(Z.ZFILE), zData(Buffer.from(`reply.rep\x00${packet.length}\0`)),
+    zHeader(Z.ZDATA), zData(packet), zHeader(Z.ZEOF, packet.length), zHeader(Z.ZFIN), Buffer.from('OO')
+  ]));
+  assert.match(plainText(s.output.join('')), /Imported 1 replies; 1 queued for approval/);
+  assert.equal(store.access.messages(user, 0, 1).length, 0);
+  assert.equal(store.messages(0, 1, true).length, 1);
+});
+
+test('tightened byte ratios stop active downloads before sending more binary output', t => {
+  const f = fixture(t), { store, user, transfers } = f;
+  const own = transfers.save(user, 'credit.txt', Buffer.from('1234'));
+  transfers.approve(own);
+  const owner = store.createUser('OtherOwner', 'test-only-hash');
+  const file = transfers.save(owner, 'large.bin', Buffer.from('12345678'));
+  transfers.approve(file);
+  const s = session(f);
+  t.after(() => transfers.cancel(s));
+  transfers.begin(s, { direction: 'send', kind: 'download', file: transfers.download(user, file) });
+  const before = s.binary.length;
+  store.limits.setDefaults({ download_ratio: 1, daily_minutes: 0 });
+  transfers.feed(s, zHeader(Z.ZRINIT));
+  assert.equal(s.binary.length, before);
+  assert.equal(transfers.active.has(s), false);
+  assert.match(plainText(s.disconnected), /Download ratio exceeded/);
+  assert.equal(s.closed, true);
+  assert.equal(store.limits.ratioUsage(user).downloaded_bytes, 8);
+});
+
 test('deleted uploaders keep approved files under a deleted identity without transferring ownership', t => {
   const { store, user, transfers } = fixture(t);
   const file = transfers.save(user, 'preserved.txt', Buffer.from('Preserved payload'));

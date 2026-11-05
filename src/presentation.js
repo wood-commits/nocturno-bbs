@@ -12,11 +12,11 @@ export const loginChoices = [
   ['S', 'Message sysop'], ['Q', 'Hangup']
 ];
 export const mainChoices = [
-  ['E', 'email'], ['C', 'user config'], ['U', 'user list'], ['F', 'files'],
-  ['M', 'message menu'], ['S', 'note to sysop'], ['K', 'qwk mail menu'],
-  ['O', 'automessage'], ['P', 'page sysop'], ['T', 'your stats'],
-  ['B', 'bbs list'], ['L', 'last callers'], ['I', 'oneliners'],
-  ['D', 'doors'], ['G', 'autosig menu'], ['Q', 'goodbye']
+  ['E', 'Email'], ['C', 'User Config'], ['U', 'User List'], ['F', 'Files'],
+  ['M', 'Message Menu'], ['S', 'Note to Sysop'], ['K', 'QWK Mail Menu'],
+  ['O', 'Automessage'], ['P', 'Page Sysop'], ['T', 'Your Stats'],
+  ['B', 'BBS List'], ['L', 'Last Callers'], ['I', 'Oneliners'],
+  ['D', 'Doors'], ['G', 'Autosig Menu'], ['Q', 'Goodbye']
 ];
 export const mainInitialSelection = mainChoices.findIndex(([key]) => key === 'M');
 export const mainChoiceGrid = [[null, 0, 1], [null, 2, 3], [4, 5, 6], [7, 8, 9], [10, 11, 12], [13, 14, 15]];
@@ -148,9 +148,55 @@ function cursorPosition(source) {
   return { row, column };
 }
 
+function sgrState(source, end) {
+  let restore = '\x1b[0m';
+  // Replay only the current SGR state, including extended-color templates.
+  // eslint-disable-next-line no-control-regex
+  for (const color of source.slice(0, end).matchAll(/\x1b\[([0-9;]*)m/g)) {
+    if (Number(color[1].split(';')[0]) === 0) restore = '';
+    restore += color[0];
+  }
+  return restore;
+}
+
+function loginLabels(source, selected, store, values) {
+  let output = source;
+  for (const match of [...source.matchAll(/~0([1-5])/g)].reverse()) {
+    const start = match.index;
+    const index = Number(match[1]) - 1;
+    const column = cursorPosition(substitute(source.slice(0, start), values)).column;
+    let available = 3, end = start + 3;
+    while (available < 80 - column + 1) {
+      // Labels may use blank padding across SGR changes, but never artwork glyphs.
+      // eslint-disable-next-line no-control-regex
+      const color = /^\x1b\[[0-9;]*m/.exec(source.slice(end));
+      if (color) end += color[0].length;
+      else if (source[end] === ' ') { end++; available++; }
+      else break;
+    }
+    const width = Math.min(available, Math.max(0, 80 - column + 1));
+    const label = plainText(uiText(store, loginChoices[index][1])).slice(0, width).padEnd(Math.min(3, width));
+    end = start + 3;
+    for (let consumed = 3; consumed < label.length;) {
+      // eslint-disable-next-line no-control-regex
+      const color = /^\x1b\[[0-9;]*m/.exec(source.slice(end));
+      if (color) end += color[0].length;
+      else { end++; consumed++; }
+    }
+    output = output.slice(0, start) +
+      `\x1b[0;${index === selected ? '1;37;44' : '37;40'}m${label}${sgrState(source, end)}` +
+      output.slice(end);
+  }
+  return output;
+}
+
 function mainLabels(source, selected, values = {}) {
   const widths = mainColumnWidths();
-  const matches = mainChoices.map(([, label], index) => ({ label, index, offset: source.indexOf(label) }))
+  const folded = source.toLowerCase();
+  const matches = mainChoices.map(([, label], index) => {
+    const offset = folded.indexOf(label.toLowerCase());
+    return { label: source.slice(offset, offset + label.length), index, offset };
+  })
     .filter(match => match.offset >= 0).sort((a, b) => b.offset - a.offset);
   let output = source;
   for (const { label, index, offset } of matches) {
@@ -183,14 +229,7 @@ function mainLabels(source, selected, values = {}) {
       }
       text += ' '.repeat(spaces);
     }
-    let restore = '\x1b[0m';
-    // Replay only the current SGR state, including extended-color templates.
-    // eslint-disable-next-line no-control-regex
-    for (const color of source.slice(0, end).matchAll(/\x1b\[([0-9;]*)m/g)) {
-      if (Number(color[1].split(';')[0]) === 0) restore = '';
-      restore += color[0];
-    }
-    output = output.slice(0, start) + `\x1b[0;1;${index === selected ? '37;44' : '30;40'}m${text}${restore}` + output.slice(end);
+    output = output.slice(0, start) + `\x1b[0;1;${index === selected ? '37;44' : '30;40'}m${text}${sgrState(source, end)}` + output.slice(end);
   }
   return output;
 }
@@ -260,12 +299,11 @@ export class Presentation {
         }
         source = bytes.toString('latin1');
       } finally { closeSync(fd); }
-      const cp437 = legacyTokens.has(screen) || ['main-new', 'stats', 'welcome'].includes(screen);
-      if (cp437) source = source.replaceAll('\0', '');
+      source = source.replaceAll('\0', '');
       // Permit art plus bounded CSI color/cursor sequences, never OSC or telnet IAC.
       // eslint-disable-next-line no-control-regex
       const plain = source.replace(/\x1b\[[0-9;?]{0,24}[mHfABCDJKsu]/g, '');
-      if (!(cp437 ? /^[\x20-\x7e\x80-\xfe\r\n]*$/ : /^[\x20-\x7e\r\n]*$/).test(plain)) {
+      if (!/^[\x20-\x7e\x80-\xfe\r\n]*$/.test(plain)) {
         throw new InputError('error_unsupported_ansi_controls_value_ans', { SCREEN: screen });
       }
       for (const match of source.matchAll(/%([A-Z]+)%/g)) {
@@ -278,6 +316,17 @@ export class Presentation {
       }
       source = source.replace(/\r\n|\r|\n/g, '\r\n');
       source = classicColors(source);
+      if (screen === 'loginmatrix' || screen === 'main-new') {
+        // Exported blank rows must not scroll the fixed-screen artwork.
+        const rows = source.split('\r\n');
+        while (rows.length > 1) {
+          // eslint-disable-next-line no-control-regex
+          const text = rows.at(-1).replace(/\x1b\[[0-9;]*m/g, '');
+          if (text.replaceAll(' ', '') !== '') break;
+          rows.pop();
+        }
+        source = rows.join('\r\n');
+      }
       if (fixedScreens.has(screen)) source = fixedRows(source);
       const bounded = screen === 'main-new' ? mainLabels(source, 0) : source;
       if (bounded.replace(/%[A-Z]+%|~[A-Z0-9]{2}/g, 'x'.repeat(160)).length + 512 > 32768) {
@@ -324,12 +373,7 @@ export class Presentation {
     if (source === undefined) return fallback;
     const literal = value => safeText(value).replaceAll('%', '\0');
     if (screen === 'loginmatrix') {
-      source = legacyFields(source, /~0([1-5])/g, (digit, width) => {
-        const index = Number(digit) - 1;
-        const labelWidth = Math.max(width, loginChoices[index][1].length);
-        const label = plainText(uiText(store, loginChoices[index][1])).slice(0, labelWidth).padEnd(labelWidth);
-        return index === selected ? `\x1b[7m${label}\x1b[27m` : label;
-      });
+      source = loginLabels(source, selected, store, values);
     } else if (screen === 'main-new') {
       source = mainLabels(source, selected, values);
     } else if (screen === 'login') {

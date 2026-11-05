@@ -6,6 +6,7 @@ import { ansi, date, waitingScreen, sysopScreen, sysopMenuRow, sysopFooter, read
   stringEditorList, stringEditorDetail, sysopInput, sysopClip } from './screens.js';
 import { stringDefaults } from './presentation.js';
 import { LocalTerminal } from './local-terminal.js';
+import { MAX_RATIO, MAX_DAILY_MINUTES } from './limits.js';
 
 const stringPageSize = 3;
 const userFields = [
@@ -77,9 +78,29 @@ export class SysopConsole {
           ui(this.store, 'sysop_listener_addresses_ports_and_certificates_remain_environment_s'),
           '', sysopMenuRow(this.store, 'sysop_b_create_list_message_bases_u_edit_users_t_string_editor'),
           sysopMenuRow(this.store, 'access_config_help', 2),
-          '', ui(this.store, 'sysop_config_return_help')
+          ui(this.store, 'limits_config_help'), ui(this.store, 'sysop_config_return_help')
         ];
         prompt = ui(this.store, 'sysop_a_e_1_2_b_u_t_configure_q_wfc');
+      } else if (this.view === 'limits' || this.view === 'user-limits') {
+        const local = this.view === 'user-limits';
+        const limits = local ? this.store.limits.user(this.userId) : this.store.limits.defaults();
+        const effective = local ? this.store.limits.resolve(this.userId) : limits;
+        const display = key => {
+          const value = effective[key] === 0 ? ui(this.store, 'limits_unlimited') :
+            ui(this.store, key === 'download_ratio' ? 'limits_ratio_value' : 'limits_minutes_value', { VALUE: effective[key] });
+          return limits[key] === null ? ui(this.store, 'limits_inherited', { VALUE: value }) : value;
+        };
+        lines = [ui(this.store, 'limits_scope', { SCOPE: local ? this.store.user(this.userId).handle : ui(this.store, 'limits_global') }), '',
+          ui(this.store, 'limits_ratio_row', { VALUE: display('download_ratio') }),
+          ui(this.store, 'limits_time_row', { VALUE: display('daily_minutes') }), '',
+          ui(this.store, 'limits_ratio_help'), ui(this.store, 'limits_time_help'), ui(this.store, 'limits_live_help')];
+        if (local) {
+          const usage = this.store.limits.ratioUsage(this.userId);
+          lines.push(ui(this.store, 'limits_inherit_help'), '',
+            ui(this.store, 'limits_bytes', { UPLOADED: usage.uploaded_bytes, DOWNLOADED: usage.downloaded_bytes }),
+            ui(this.store, 'limits_daily_used', { USED: (this.store.limits.account(this.userId) / 60000).toFixed(2) }));
+        }
+        prompt = ui(this.store, 'limits_prompt');
       } else if (this.view === 'roles') {
         lines = [ui(this.store, 'access_roles_heading'), ...this.store.access.roles(this.page).map(role => ui(this.store, 'access_role_list_row', {
           ID: String(role.id).padEnd(7), NAME: sysopClip(this.store, role.name, 25).padEnd(25),
@@ -166,10 +187,13 @@ export class SysopConsole {
       } else if (this.view === 'strings') {
         lines = stringEditorList(this.store, this.stringKeys(), this.page, stringPageSize, this.stringFilter);
         prompt = ui(this.store, 'string_editor_prompt');
-      } else if (this.view === 'messages') {
-        lines = [ui(this.store, 'sysop_base_value', { NAME: this.store.base(this.baseId).name }), ui(this.store, 'sysop_id_from_subject'), ...this.store.messages(this.page, this.baseId).map(message =>
+      } else if (this.view === 'messages' || this.view === 'pending-messages') {
+        lines = [ui(this.store, 'sysop_base_value', { NAME: this.store.base(this.baseId).name }), ui(this.store, 'sysop_id_from_subject'),
+          ...this.store.messages(this.page, this.baseId, this.view === 'pending-messages').map(message =>
           ui(this.store, 'sysop_value_value_value_3', { VALUE1: String(message.id).padEnd(7), VALUE2: safeText(message.handle).padEnd(25), SUBJECT: sysopClip(this.store, message.subject, 42) }))];
-        prompt = ui(this.store, 'sysop_id_read_d_id_delete_n_p_q');
+        if (lines.length === 2) lines.push(ui(this.store, 'sysop_empty_page'));
+        lines.push('', ui(this.store, 'moderation_status', { STATUS: ui(this.store, this.store.moderation(this.baseId) ? 'user_editor_yes' : 'user_editor_no') }));
+        prompt = ui(this.store, this.view === 'pending-messages' ? 'moderation_pending_prompt' : 'moderation_messages_prompt');
       } else if (this.view === 'callers') {
         lines = [ui(this.store, 'sysop_call_handle_logon_utc_min_node'),
           ...this.store.callers(this.page).map(call => {
@@ -185,7 +209,7 @@ export class SysopConsole {
       }
       const empty = new Map([['roles', [1, 1]], ['file-bases', [0, 0]], ['requests', [1, 1]],
         ['files', [1, 1]], ['applications', [1, 1]], ['users', [3, 1]], ['bases', [0, 0]],
-        ['messages', [2, 2]], ['callers', [3, 1]], ['nodes', [1, 1]]]).get(this.view);
+        ['callers', [3, 1]], ['nodes', [1, 1]]]).get(this.view);
       if (empty && lines.length === empty[0]) lines.splice(empty[1], 0, ui(this.store, 'sysop_empty_page'));
       const title = new Map([['config', 'SYSTEM CONFIGURATION'], ['users', 'USER EDITOR'],
         ['user-detail', 'USER EDITOR'], ['bases', 'MESSAGE BASES'], ['strings', 'STRING EDITOR'],
@@ -193,7 +217,9 @@ export class SysopConsole {
         ['applications', 'APPLICATIONS'], ['files', 'FILE CATALOG'],
         ['requests', 'SYSOP REQUESTS'], ['request-read', 'PRIVATE SYSOP REQUEST'],
         ['messages', 'MESSAGE BASE'], ['callers', 'CALLER HISTORY'], ['nodes', 'NODE LIST']]).get(this.view);
-      frame = sysopScreen(ui(this.store, 'sysop_value_page_value', { TITLE: uiText(this.store, title), VALUE2: this.page + 1 }),
+      const heading = this.view === 'limits' || this.view === 'user-limits' ? ui(this.store, 'limits_title') :
+        this.view === 'pending-messages' ? ui(this.store, 'moderation_pending_title') : uiText(this.store, title);
+      frame = sysopScreen(ui(this.store, 'sysop_value_page_value', { TITLE: heading, VALUE2: this.page + 1 }),
         settings.name, lines, prompt, rows);
     }
     this.prompt = ui(this.store, 'sysop_value_2', {
@@ -309,8 +335,10 @@ export class SysopConsole {
     if (this.view === 'chat') return '';
     if (this.view === 'watch-controls') return 'CHQ';
     if (this.view === 'wfc') return 'SUBCNQAFRL';
-    if (this.view === 'config') return 'AE12BUTRFQ';
-    if (this.view === 'user-detail') return '12345678XQ';
+    if (this.view === 'config') return 'AE12BUTRFGQ';
+    if (this.view === 'user-detail') return '12345678XLQ';
+    if (this.view === 'limits' || this.view === 'user-limits') return '12Q';
+    if (this.view === 'messages') return 'NPQTM';
     return this.view === 'users' ? 'NQ' : 'NPQ';
   }
 
@@ -374,7 +402,10 @@ export class SysopConsole {
     }
     if (command === 'Q') {
       if (this.view !== 'wfc') {
-        this.view = this.view === 'read' ? 'messages' : this.view === 'request-read' ? 'requests' : this.view === 'user-detail' ? 'users' :
+        this.view = this.view === 'read' ? this.messageReturnView ?? 'messages' :
+          this.view === 'pending-messages' ? 'messages' : this.view === 'limits' ? 'config' :
+          this.view === 'user-limits' ? 'user-detail' :
+          this.view === 'request-read' ? 'requests' : this.view === 'user-detail' ? 'users' :
           this.view === 'role-detail' ? 'roles' :
           ['bases', 'strings', 'roles', 'file-bases'].includes(this.view) ? 'config' : 'wfc';
         if (this.view !== 'users') this.page = 0;
@@ -399,8 +430,8 @@ export class SysopConsole {
       this.page = 0;
     } else if (this.view === 'config') {
       const settings = this.store.settings();
-      if (['B', 'U', 'T', 'R', 'F'].includes(command)) {
-        this.view = new Map([['B', 'bases'], ['U', 'users'], ['T', 'strings'], ['R', 'roles'], ['F', 'file-bases']]).get(command);
+      if (['B', 'U', 'T', 'R', 'F', 'G'].includes(command)) {
+        this.view = new Map([['B', 'bases'], ['U', 'users'], ['T', 'strings'], ['R', 'roles'], ['F', 'file-bases'], ['G', 'limits']]).get(command);
         this.page = 0;
       } else if (command === 'E') {
         this.confirm(ui(this.store, 'sysop_value_new_caller_registration', { VALUE1: settings.registration ? 'Close' : 'Open' }), () =>
@@ -416,6 +447,24 @@ export class SysopConsole {
           }
         };
       } else throw new InputError('sysop_a_e_1_2_b_u_t_configure_q_wfc');
+    } else if (this.view === 'limits' || this.view === 'user-limits') {
+      if (!['1', '2'].includes(command) || value) throw new InputError('limits_prompt');
+      const local = this.view === 'user-limits';
+      const userId = this.userId;
+      const key = command === '1' ? 'download_ratio' : 'daily_minutes';
+      this.field = {
+        prompt: ui(this.store, local ? 'limits_user_field_prompt' : 'limits_field_prompt'),
+        save: input => {
+          const inherit = local && input.trim() === '-';
+          if (!inherit && !/^[0-9]{1,4}$/.test(input.trim())) throw new InputError('limits_invalid_value');
+          const next = inherit ? null : Number(input.trim());
+          if (next !== null && next > (key === 'download_ratio' ? MAX_RATIO : MAX_DAILY_MINUTES)) throw new InputError('limits_invalid_value');
+          this.confirm(ui(this.store, 'limits_confirm'), () => {
+            if (local) this.store.limits.setUser(userId, { ...this.store.limits.user(userId), [key]: next });
+            else this.store.limits.setDefaults({ ...this.store.limits.defaults(), [key]: next });
+          });
+        }
+      };
     } else if (this.view === 'read') {
       const current = this.store.message(this.reading.id);
       if (!current) throw new InputError('Message no longer exists.');
@@ -429,6 +478,11 @@ export class SysopConsole {
       if (!['N', 'P'].includes(command)) throw new InputError('Choose N, P or Q.');
       this.readPage = Math.max(0, Math.min(request.pages - 1, this.readPage + (command === 'N' ? 1 : -1)));
     } else if (this.view === 'user-detail') {
+      if (command === 'L' && !value) {
+        this.store.limits.user(this.userId);
+        this.view = 'user-limits';
+        return;
+      }
       if (command === 'X' && !value) {
         const user = this.store.user(this.userId);
         if (!user) throw new InputError('User not found.');
@@ -591,15 +645,34 @@ export class SysopConsole {
       } else if (command === 'R') {
         this.confirm(ui(this.store, 'sysop_restore_value_to_its_default', { VALUE: key }), () => this.store.resetString(key));
       } else throw new InputError('Use E key or R key.');
-    } else if (this.view === 'messages') {
+    } else if (this.view === 'messages' || this.view === 'pending-messages') {
+      if (this.view === 'messages' && !value && command === 'T') {
+        this.view = 'pending-messages';
+        this.page = 0;
+        return;
+      }
+      if (this.view === 'messages' && !value && command === 'M') {
+        const enabled = !this.store.moderation(this.baseId), baseId = this.baseId;
+        this.confirm(ui(this.store, 'moderation_confirm'), () => this.store.setModeration(baseId, enabled));
+        return;
+      }
+      if (this.view === 'pending-messages' && ['A', 'R'].includes(command) && !rest.length) {
+        const messageId = id(value), message = this.store.message(messageId);
+        if (message?.base_id !== this.baseId || !this.store.isMessagePending(messageId)) throw new InputError('moderation_pending_missing');
+        this.confirm(ui(this.store, 'moderation_decide_confirm', { ID: messageId }),
+          () => this.store.decideMessage(messageId, command === 'A'));
+        return;
+      }
       const messageId = id(command === 'D' ? value : verb);
       const message = this.store.message(messageId);
       if (!message || message.base_id !== this.baseId) throw new InputError('Message not found.');
+      if (this.store.isMessagePending(messageId) !== (this.view === 'pending-messages')) throw new InputError('Message not found.');
       if (command === 'D') this.confirm(ui(this.store, 'sysop_permanently_delete_message_value_value', { MESSAGE_ID: messageId, SUBJECT: message.subject }), () =>
         this.store.deleteMessage(messageId));
       else {
         this.reading = message;
         this.readPage = 0;
+        this.messageReturnView = this.view;
         this.view = 'read';
       }
     } else if (this.view === 'nodes' && command === 'W' && !rest.length) {

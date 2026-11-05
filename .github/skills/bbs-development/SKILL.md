@@ -21,15 +21,20 @@ Follow the byte-to-screen path:
 4. `src/session.js` owns authentication and menu/editor/read states per socket.
 5. `src/auth.js` owns scrypt, timing-safe checks and bounded password work.
 6. `src/store.js` owns SQLite schema, queries and public data projections.
-7. `src/screens.js` produces ANSI menus and the local sysop dashboard.
+7. `src/screens.js` produces ANSI menus and the local sysop dashboard using named
+   layout/field-width/timing/color constants; viewport dimensions reuse LocalTerminal.
 8. `src/index.js` owns startup and graceful shutdown. `src/errors.js` supplies
    the shared sanitized reporter for the executable and server default:
    allowlisted code/name only, at most 64 characters, never message/stack.
+   Startup adds fixed stage-specific hints and allowlisted failure reasons/template
+   names, never raw messages, stacks, paths, environment values or template content.
    Trusted custom onError callbacks still receive original errors; never log them raw.
 9. `src/sysop.js` owns local sysop navigation, confirmations and bounded raw-TTY
    keyboard input. It is never reachable from a caller's telnet session.
 10. `src/presentation.js` loads fixed optional ANSI templates at startup, validates
     controls/placeholders/size and sanitizes substitutions.
+    All artwork templates accept CP437 bytes and discard NUL padding;
+    unsafe controls and telnet IAC remain rejected.
     See ANSI.md for per-screen tokens; list rows and message bodies stay generated.
     Private `ansi` is ignored by Git. If absent, load original `examples/ansi`;
     an existing private directory uses built-in fallbacks for missing files.
@@ -52,6 +57,9 @@ Follow the byte-to-screen path:
     (ID 1) preserves old access, new custom roles deny by default. Missing grants
     deny. Caller reads use access.message/messages/messageBases, never the trusted
     local-console store.message/messages/bases APIs directly.
+    `src/limits.js` owns durable global/user byte ratios and UTC daily time
+    accounting. Zero disables; nullable user overrides inherit. Keep quota
+    enforcement at call start, live access checks and transfer boundaries.
 15. `src/mcp-server.js` owns opt-in, token-authenticated local IPC MCP;
       `src/mcp.js` bridges stdio without opening SQLite. `src/mcp-terminal.js`
       reuses normal caller sessions (including raw telnet transfers) or the
@@ -165,6 +173,25 @@ Follow the byte-to-screen path:
 - S/B creates/lists bases, S/U edits users, S/T edits display strings. WFC B
   moderates General; base manager O ID moderates another base. Callers M/B
   select a base; IDs remain global. Existing posts migrate to General (ID 1).
+- S/G edits global ratios/daily minutes; U/ID/L edits user overrides, each
+  requiring YES. Ratio 0-1000 means download bytes per approved upload byte;
+  daily minutes 0-1440 sum all authenticated concurrent calls in UTC. User
+  "-" inherits; 0 overrides as unlimited. Track time even when unlimited,
+  checkpoint at most one second apart and near exhaustion, and retain usage
+  independently of caller pruning. Backward clocks cannot reset/double-charge;
+  restart drops stale active checkpoints without charging offline downtime.
+  Do not attach session.user before startCall passes its daily quota check.
+  Approved uploads credit bytes exactly once atomically with approval; removal
+  and unapproval keep earned credit. Ordinary downloads debit their full size
+  before starting binary output, without abort refunds; counts still require
+  successful completion. QWK/REP and mail are exempt from file byte ratios.
+- Message-list M toggles per-base approval with YES; T opens pending posts.
+  Pending queues accept numeric reads, A ID approval and R ID rejection with
+  YES. Callers, statistics and QWK export must exclude pending rows; validate
+  reply parents through Access.message. Store.messages(page, base, true) and
+  Store.message are trusted console APIs. REP imports honor moderation
+  atomically, and online submissions report queued IDs. Reject by clearing
+  content/reserving IDs; disabling moderation never releases an existing queue.
 - S/R manages roles: C name creates, V ID/numeric ID opens grants, G post doors
   sets global flags, M base read post and F base list download upload set base
   grants. Every mutation requires YES. U/ID/8 or A user role assigns a role.
@@ -187,6 +214,11 @@ Follow the byte-to-screen path:
   Check enabled account and door permissions on game commands; enforce posting
   permissions at the storage boundary and during composition.
 - Login/main menus use arrow keys and Enter, with immediate letter shortcuts.
+  Login markers use explicit white-on-blue active/gray-on-black inactive colors,
+  never reverse video. Consume only adjacent blank padding across SGR changes;
+  clip labels before artwork/screen edges and restore surrounding color state.
+  Trim trailing blank export rows from login/main lightbar artwork to avoid
+  scrolling before the fixed footer.
   Login password errors and application/status notices go through showWelcome
   and the loginMatrix renderer, never append a second selection prompt.
   Artwork notices replace row 23 with 79 visible columns; row 24 stays the prompt.
@@ -220,7 +252,9 @@ Follow the byte-to-screen path:
   raw pipes, per-key placeholders and trailing spaces. Editable text never changes
   commands, validation rules, authentication results or permissions.
 - Main artwork labels use explicit white-on-blue active/gray-on-black inactive
-  colors, never reverse video on dark labels. Restore surrounding SGR state;
+  colors with case-insensitive matching that preserves original lettering.
+  Generated menus/help use capitalized names and QWK/BBS acronyms.
+  Never use reverse video on dark labels. Restore surrounding SGR state;
   reserve only row 24 for the prompt, not a generated status banner over the art.
   Bars use each column's longest visible label plus one blank on either side.
   Preserve artwork positions/glyphs across intervening SGR; use implicit trailing
@@ -249,6 +283,10 @@ Follow the byte-to-screen path:
 - Community editors use `session.communityState`, not `session.community`
   (the shared service). Their cooldowns persist across sessions. A caller's
   `user_note`/USERNOTE is separate from local-only `sysop_note`.
+  Community output separates CRLF-terminated content from the final inline
+  menu/field/retry prompt so local and remote input follows the prompt cursor.
+  Default shortcut brackets use normal cyan (`|03`), bright keys and gray labels;
+  saved overrides and caller text remain literal and authoritative.
 - File payloads use generated UUID names under BBS_DATA_DIR/files, with lazy
   directory creation. Preserve approved catalogs, reserved IDs and durable
   completed transfer counts. Downloads open once, then compare descriptor and

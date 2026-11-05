@@ -14,10 +14,10 @@ screens. No database changes are necessary. Restart the BBS after
 editing files. Invalid files cause an explicit startup error, not a silent
 fallback. Local sysop screens are intentionally not overridden.
 
-Use ASCII text with real ESC-based ANSI/VT100 CSI sequences, not the literal
-characters `\x1b`. The legacy screens listed below also accept DOS CP437
+Use ASCII or DOS CP437 text with real ESC-based ANSI/VT100 CSI sequences, not the literal
+characters `\x1b`. All artwork templates accept DOS CP437
 artwork; configure your client for **CP437**, not UTF-8. Output preserves the
-original CP437 bytes. Save ASCII templates without a BOM. CRLF, LF and CR line endings
+original CP437 bytes. Save templates without a BOM. CRLF, LF and CR line endings
 are accepted and sent as CRLF. Each file must be a regular file no larger than
 16 KiB, with a conservative expanded-output limit of 32 KiB. Supported sequences are CSI color (`m`), cursor position/movement
 (`H`, `f`, `A`, `B`, `C`, `D`), erase (`J`, `K`) and cursor save/restore (`s`, `u`).
@@ -29,8 +29,12 @@ This preserves bright/dim transitions on clients that ignore modern SGR codes.
 Templates using extended-color SGR are preserved and require a compatible client.
 OSC, hyperlinks, terminal queries, bell, tabs, telnet IAC and other controls
 are rejected. Templates are trusted local configuration, never uploads.
+Generated shortcut brackets use normal cyan (`|03`), with bright yellow keys
+(`|14`) and gray labels (`|07`); destructive door actions retain bright red keys.
+Saved string overrides remain authoritative. Community input prompts do not
+append CRLF after the prompt; completed content lines still use explicit CRLF.
 Trailing SAUCE records and their bounded comment blocks are removed, together
-with the DOS EOF marker immediately before them. Legacy artwork's NUL padding
+with the DOS EOF marker immediately before them. Artwork's NUL padding
 is discarded, never transmitted. Other embedded controls remain invalid.
 
 Each custom region begins with reset/clear/home and ends with reset/CRLF,
@@ -45,7 +49,9 @@ The login matrix reserves rows 23-24 for its warnings, navigation and prompt;
 password errors and application notices replace the row-23 warning rather than
 adding lines or another selection prompt below the menu.
 The matrix's original rows 1-22 are preserved. The main menu reserves only row 24 for
-its prompt; no generated status banner overwrites the artwork. Use an 80-column,
+its prompt. Trailing blank export rows are removed from both interactive templates
+so they cannot scroll the artwork before the fixed footer is drawn.
+No generated status banner overwrites the main artwork. Use an 80-column,
 at least 24-row terminal.
 Design for 80 columns, accounting for the **maximum substituted field length**.
 There is no automatic wrapping or alignment of substituted text.
@@ -56,6 +62,11 @@ terminal controls or recursively expand another placeholder.
 
 All filenames are lowercase and fixed. Tokens are uppercase and case-sensitive.
 Unknown uppercase `%TOKEN%` placeholders fail startup validation.
+
+Login-matrix choice markers use explicit white-on-blue active and gray-on-black
+inactive colors, not reverse video. Leave blank space after each marker for its
+label. Padding may cross SGR changes; labels clip at nearby artwork or the screen
+edge instead of shifting glyphs. Surrounding artwork colors are restored afterward.
 
 Every screen supports these common placeholders:
 
@@ -84,8 +95,8 @@ Every screen supports these common placeholders:
 | `doors.ans` | Door lounge heading and game menu | None |
 | `realm.ans` | Optional artwork when entering Frontier Realms | `%PAGE%` |
 
-CP437 is accepted by `loginmatrix`, `login`, `welcome`, `stats`, `main-new` and
-`new-message-header`. Other templates retain the original ASCII-only format.
+Every template listed above accepts CP437 characters and the same allowlisted
+ANSI escape sequences. Caller text and placeholder values remain sanitized.
 Only the documented per-screen tilde codes are accepted. Legacy header fields
 consume their original padding and truncate to fit the artwork. Subjects and base
 names appear in full below the header only when missing or too long for its fields.
@@ -126,8 +137,10 @@ The initial selection is **Messages (M)**, the first option in the left column.
 Each caller's main-menu selection survives returning from sections, help and
 artwork; letter shortcuts update the remembered item too. Login selection is
 independent. Generated menus share the artwork's navigation grid and colors.
-The main lightbar matches the bundled labels; keep those labels when editing
-`main-new.ans`. Every label receives explicit active/inactive colors, avoiding
+The main lightbar matches the bundled label words case-insensitively; uppercase,
+lowercase, title case and mixed case are accepted in `main-new.ans`. The artwork's
+original lettering is preserved. Generated menus and help use capitalized names,
+including QWK and BBS. Every label receives explicit active/inactive colors, avoiding
 black-on-black reverse video and clearing any baked-in example highlight.
 Each column's highlight is its longest label plus one blank on each side.
 Labels stay at their artwork positions; padding uses adjacent whitespace.

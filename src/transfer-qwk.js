@@ -119,7 +119,7 @@ export function buildQwk(store, user) {
   const rows = store.db.prepare(`SELECT m.id, m.base_id, m.subject, m.body, m.created_at, u.handle
     FROM messages m JOIN users u ON u.id = m.user_id
     JOIN message_permissions p ON p.base_id = m.base_id
-    WHERE m.removed = 0 AND m.base_id BETWEEN 1 AND 65535 AND p.role_id = ? AND p.can_read = 1
+    WHERE m.removed = 0 AND m.pending = 0 AND m.base_id BETWEEN 1 AND 65535 AND p.role_id = ? AND p.can_read = 1
     ORDER BY m.id DESC LIMIT ?`).all(user.role_id, MAX_MESSAGES).reverse();
   const timestamp = new Date().toISOString();
   const control = [

@@ -4,13 +4,14 @@ import { config } from './config.js';
 import { ansi } from './screens.js';
 import { startSysopConsole } from './sysop.js';
 import { startMcpServer } from './mcp-server.js';
-import { reportError as report } from './errors.js';
+import { reportError as report, reportStartupError } from './errors.js';
 
 let store;
 let bbs;
 let sysop;
 let mcp;
 let shuttingDown = false;
+let startupStage = 'configuration';
 async function shutdown() {
   if (shuttingDown) return;
   shuttingDown = true;
@@ -37,17 +38,23 @@ async function shutdown() {
 
 try {
   const options = config();
+  startupStage = 'database';
   store = new Store(options.filename);
+  startupStage = 'services';
   bbs = await createBbs({ ...options, store, onError: report });
-  if (options.mcp) mcp = await startMcpServer({ ...options.mcp, store, bbs,
-    onQuit: () => { void shutdown(); }, onError: report });
+  if (options.mcp) {
+    startupStage = 'mcp';
+    mcp = await startMcpServer({ ...options.mcp, store, bbs,
+      onQuit: () => { void shutdown(); }, onError: report });
+  }
   if (process.stdin.isTTY && process.stdout.isTTY && options.dashboard) {
+    startupStage = 'console';
     sysop = startSysopConsole({ store, bbs, onQuit: () => { void shutdown(); }, onError: report });
   } else console.log(`${store.settings().name}\nWaiting for callers:\n${bbs.endpoints.join('\n')}`);
   process.on('SIGINT', () => { void shutdown(); });
   process.on('SIGTERM', () => { void shutdown(); });
 } catch (error) {
-  report(error);
+  reportStartupError(error, startupStage);
   await shutdown();
   process.exitCode = 1;
 }

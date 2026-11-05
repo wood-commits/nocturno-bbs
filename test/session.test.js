@@ -4,7 +4,7 @@ import { Session } from '../src/session.js';
 import { Store } from '../src/store.js';
 import { LocalSocket } from '../src/local-terminal.js';
 import { Presentation } from '../src/presentation.js';
-import { ui } from '../src/strings.js';
+import { ui, plainText } from '../src/strings.js';
 import { performance } from 'node:perf_hooks';
 
 function fixture(t) {
@@ -27,6 +27,23 @@ function fixture(t) {
   frames.length = 0;
   return { session, store, user, artwork, frames, errors };
 }
+
+test('main menu help uses capitalized labels and acronym names', async t => {
+  const f = fixture(t);
+  f.session.user = f.user;
+  f.session.state = 'main';
+  f.session.queue.push('?');
+  await f.session.drain();
+  const help = plainText(f.frames.join(''));
+  for (const [key, label] of [
+    ['E', 'Email'], ['C', 'User Config'], ['M', 'Message Menu'],
+    ['K', 'QWK Mail Menu'], ['B', 'BBS List'], ['S', 'Note to Sysop']
+  ]) {
+    assert.ok(help.includes(plainText(ui(f.store, 'session_value_value', { KEY: key, LABEL: label }))));
+  }
+  assert.equal(f.session.state, 'art');
+  assert.deepEqual(f.errors, []);
+});
 
 for (const replay of [false, true]) {
   test(`welcome ${replay ? 'replay' : 'login'} streams at 28.8k and waits for a fresh key`, async t => {

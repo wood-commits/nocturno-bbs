@@ -272,6 +272,7 @@ export class Session extends EventEmitter {
     this.screenHistory = '';
     this.transfers?.cancel?.(this);
     clearTimeout(this.lifetime);
+    clearTimeout(this.dailyTimer);
     clearTimeout(this.destroyTimer);
     clearTimeout(this.rateTimer);
     clearTimeout(this.welcomeTimer);
@@ -298,6 +299,7 @@ export class Session extends EventEmitter {
               this.loginScreen(errorText(this.store, error));
               continue;
             }
+
             if (this.state.endsWith('password')) {
               this.attempts++;
               if (this.attempts >= 5) this.disconnect(ui(this.store, 'session_too_many_authentication_attempts'));
@@ -315,6 +317,21 @@ export class Session extends EventEmitter {
         }
       }
     } finally { this.busy = false; }
+  }
+
+  checkDailyTime() {
+    if (this.closed) return;
+    try {
+      const delay = this.store.limits.nextCheck(this.user.id);
+      this.dailyTimer = setTimeout(() => this.checkDailyTime(), delay);
+      this.dailyTimer.unref();
+    } catch (error) {
+      if (error instanceof InputError) this.disconnect(error);
+      else {
+        this.onError(error);
+        this.disconnect(ui(this.store, 'session_internal_error_please_contact_the_sysop'));
+      }
+    }
   }
 
   prompt() {
@@ -484,9 +501,10 @@ export class Session extends EventEmitter {
         }));
         return;
       }
+      this.callId = this.store.startCall(user.id, this.id);
       this.user = user;
       this.pendingHandle = undefined;
-      this.callId = this.store.startCall(user.id, this.id);
+      this.checkDailyTime();
       this.state = 'post-welcome';
       await this.welcomeArt('session_welcome', 'continue_prompt');
     } else if (!this.user) {
@@ -614,7 +632,7 @@ export class Session extends EventEmitter {
         const id = this.store.post(this.user.id, this.subject, body, this.baseId, this.replyTo ?? null);
         this.lastPost = Date.now();
         this.cancelPost();
-        this.write(('\r\n' + (this.string('posted', { MESSAGEID: id })) + '\r\n'));
+        this.write(('\r\n' + (this.string(this.store.isMessagePending(id) ? 'moderation_queued' : 'posted', { MESSAGEID: id })) + '\r\n'));
       } else {
         if (this.body.length >= 50 || this.body.join('\n').length + line.length + 1 > 4096) {
           throw new InputError('Message limit reached. Enter . to save or /abort to cancel.');

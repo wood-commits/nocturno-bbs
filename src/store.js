@@ -7,6 +7,7 @@ import { initializeDoors } from './doors.js';
 import { initializeCommunity } from './community.js';
 import { initializeTransfers } from './transfers.js';
 import { Access, initializeAccess } from './access.js';
+import { Limits } from './limits.js';
 
 export class Store {
   constructor(filename) {
@@ -91,6 +92,13 @@ export class Store {
     if (!this.db.prepare('PRAGMA table_info(messages)').all().some(column => column.name === 'reply_to')) {
       this.db.exec('ALTER TABLE messages ADD COLUMN reply_to INTEGER REFERENCES messages(id)');
     }
+    if (!this.db.prepare('PRAGMA table_info(messages)').all().some(column => column.name === 'pending')) {
+      this.db.exec('ALTER TABLE messages ADD COLUMN pending INTEGER NOT NULL DEFAULT 0 CHECK (pending IN (0, 1))');
+    }
+    this.db.exec(`CREATE TABLE IF NOT EXISTS message_moderation (
+      base_id INTEGER PRIMARY KEY REFERENCES message_bases(id),
+      enabled INTEGER NOT NULL CHECK (enabled IN (0, 1))
+    )`);
     this.db.exec(`
       CREATE INDEX IF NOT EXISTS messages_base ON messages(base_id, removed, id);
       CREATE TRIGGER IF NOT EXISTS messages_base_insert BEFORE INSERT ON messages
@@ -105,6 +113,7 @@ export class Store {
     initializeTransfers(this.db);
     initializeAccess(this.db);
     this.access = new Access(this);
+    this.limits = new Limits(this);
     // A previous process may have stopped before its sockets could be closed.
     this.db.prepare('UPDATE calls SET ended_at = started_at WHERE ended_at IS NULL').run();
   }
@@ -217,6 +226,7 @@ export class Store {
         real_name = '', location = '', sysop_note = '' WHERE id = ?`)
         .run(`Deleted user #${user.id}`, user.id);
       this.db.prepare('DELETE FROM community_profiles WHERE user_id = ?').run(user.id);
+      this.db.prepare('DELETE FROM caller_limit_users WHERE user_id = ?').run(user.id);
       this.db.exec('COMMIT');
     } catch (error) {
       this.db.exec('ROLLBACK');
@@ -261,16 +271,30 @@ export class Store {
   }
 
   startCall(userId, node) {
-    const now = new Date().toISOString();
-    this.db.prepare('UPDATE users SET last_login = ? WHERE id = ?').run(now, userId);
-    const id = this.db.prepare(
-      'INSERT INTO calls(user_id, node, started_at) VALUES (?, ?, ?)'
-    ).run(userId, node, now).lastInsertRowid;
-    this.db.prepare('DELETE FROM calls WHERE id NOT IN (SELECT id FROM calls ORDER BY id DESC LIMIT 1000) AND ended_at IS NOT NULL').run();
-    return id;
+    const started = Date.now();
+    this.limits.checkTime(userId, started);
+    this.db.exec('SAVEPOINT call_start');
+    try {
+      const now = new Date(started).toISOString();
+      this.db.prepare('UPDATE users SET last_login = ? WHERE id = ?').run(now, userId);
+      // Pruned history must not reuse an active quota checkpoint's call ID.
+      const id = this.db.prepare(
+        `INSERT INTO calls(id, user_id, node, started_at) VALUES (
+          max(coalesce((SELECT max(id) FROM calls), 0),
+            coalesce((SELECT max(call_id) FROM caller_usage_calls), 0)) + 1, ?, ?, ?)`
+      ).run(userId, node, now).lastInsertRowid;
+      this.limits.startCall(id, userId, started);
+      this.db.prepare('DELETE FROM calls WHERE id NOT IN (SELECT id FROM calls ORDER BY id DESC LIMIT 1000) AND ended_at IS NOT NULL').run();
+      this.db.exec('RELEASE call_start');
+      return id;
+    } catch (error) {
+      this.db.exec('ROLLBACK TO call_start; RELEASE call_start');
+      throw error;
+    }
   }
 
   endCall(id) {
+    this.limits.endCall(id);
     this.db.prepare('UPDATE calls SET ended_at = ? WHERE id = ? AND ended_at IS NULL')
       .run(new Date().toISOString(), id);
   }
@@ -300,16 +324,41 @@ export class Store {
       throw new InputError('Message base is full. Contact the sysop.');
     }
     return this.db.prepare(
-      'INSERT INTO messages(user_id, subject, body, created_at, base_id, reply_to) VALUES (?, ?, ?, ?, ?, ?)'
-    ).run(userId, subject.trim(), body.trim(), new Date().toISOString(), baseId, replyTo).lastInsertRowid;
+      'INSERT INTO messages(user_id, subject, body, created_at, base_id, reply_to, pending) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    ).run(userId, subject.trim(), body.trim(), new Date().toISOString(), baseId, replyTo, Number(this.moderation(baseId))).lastInsertRowid;
   }
 
-  messages(page = 0, baseId = 1) {
+  moderation(baseId) {
+    if (!this.base(baseId)) throw new InputError('Message base not found.');
+    return Boolean(this.db.prepare('SELECT enabled FROM message_moderation WHERE base_id = ?').get(baseId)?.enabled);
+  }
+
+  setModeration(baseId, enabled) {
+    if (!this.base(baseId)) throw new InputError('Message base not found.');
+    if (typeof enabled !== 'boolean') throw new InputError('moderation_invalid');
+    this.db.prepare(`INSERT INTO message_moderation VALUES (?, ?)
+      ON CONFLICT(base_id) DO UPDATE SET enabled = excluded.enabled`).run(baseId, Number(enabled));
+  }
+
+  isMessagePending(id) {
+    return Boolean(this.db.prepare('SELECT pending FROM messages WHERE id = ? AND removed = 0').get(id)?.pending);
+  }
+
+  decideMessage(id, approved) {
+    if (typeof approved !== 'boolean') throw new InputError('moderation_invalid');
+    if (!this.db.prepare(`UPDATE messages SET pending = 0, removed = ?,
+      subject = CASE WHEN ? THEN subject ELSE '' END, body = CASE WHEN ? THEN body ELSE '' END
+      WHERE id = ? AND pending = 1 AND removed = 0`).run(Number(!approved), Number(approved), Number(approved), id).changes) {
+      throw new InputError('moderation_pending_missing');
+    }
+  }
+
+  messages(page = 0, baseId = 1, pending = false) {
     return this.db.prepare(`
       SELECT m.id, u.handle, m.subject, m.created_at, m.reply_to
-      FROM messages m JOIN users u ON u.id = m.user_id WHERE m.removed = 0 AND m.base_id = ?
+      FROM messages m JOIN users u ON u.id = m.user_id WHERE m.removed = 0 AND m.base_id = ? AND m.pending = ?
       ORDER BY m.id DESC LIMIT 10 OFFSET ?
-    `).all(baseId, page * 10);
+    `).all(baseId, Number(pending), page * 10);
   }
 
   message(id) {
@@ -322,7 +371,7 @@ export class Store {
   stats() {
     return {
       users: this.db.prepare('SELECT count(*) AS n FROM users WHERE deleted = 0').get().n,
-      messages: this.db.prepare('SELECT count(*) AS n FROM messages WHERE removed = 0').get().n,
+      messages: this.db.prepare('SELECT count(*) AS n FROM messages WHERE removed = 0 AND pending = 0').get().n,
       calls: this.db.prepare('SELECT count(*) AS n FROM calls').get().n,
       today: this.db.prepare("SELECT count(*) AS n FROM calls WHERE started_at >= ?")
         .get(new Date().toISOString().slice(0, 10)).n

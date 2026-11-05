@@ -36,7 +36,7 @@ async function client(port, tlsOptions) {
     wait: async value => {
       const targets = Array.isArray(value) ? value : [value];
       const deadline = Date.now() + (targets.some(target => target.includes('Press any key')) ? 15000 : 5000);
-      while (!targets.some(target => output.includes(target))) {
+      while (!targets.some(target => output.includes(target) || plainText(output).includes(target))) {
         if (Date.now() > deadline) assert.fail(`Timed out waiting for ${value}; received ${output}`);
         await delay(10);
       }
@@ -67,6 +67,69 @@ async function register(caller, store, handle = 'Night_Owl') {
   await caller.wait('Main command:');
   assert.ok(!caller.output().includes('unique test password!'));
 }
+
+test('telnet enforces queued moderation, byte ratios and daily exhaustion before another login', { timeout: 15000 }, async t => {
+  const directory = mkdtempSync(join(tmpdir(), 'nocturno-quota-socket-'));
+  const store = new Store(':memory:'), errors = [];
+  const bbs = await createBbs({ store, port: 0, ansiDirectory: directory,
+    transferDirectory: join(directory, 'files'), onError: error => errors.push(error) });
+  t.after(async () => {
+    await bbs.close();
+    store.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+  const port = Number(bbs.endpoints[0].split(':').at(-1));
+  const caller = await client(port);
+  t.after(() => caller.socket.destroy());
+  await register(caller, store);
+  const user = store.findUser('Night_Owl').id;
+  caller.clear(); caller.send('M');
+  await caller.wait('GENERAL MESSAGE BASE');
+  caller.clear(); caller.send('W');
+  await caller.wait('Subject');
+  caller.clear(); caller.send('Socket queued');
+  await caller.wait('single . saves');
+  caller.send('Socket queued body');
+  store.setModeration(1, true);
+  caller.clear(); caller.send('.');
+  await caller.wait('queued for local sysop approval');
+  const pending = store.messages(0, 1, true)[0].id;
+  assert.equal(store.access.message(user, pending, 1), undefined);
+  assert.equal(store.stats().messages, 0);
+  store.decideMessage(pending, true);
+  caller.clear(); caller.send(String(pending));
+  await caller.wait('Socket queued body');
+  caller.clear(); caller.send('Q');
+  await caller.wait('GENERAL MESSAGE BASE');
+  caller.clear(); caller.send('Q');
+  await caller.wait('Main command:');
+  const owner = store.createUser('FileOwner', 'test-only-hash');
+  const file = bbs.transfers.save(owner, 'payload.bin', Buffer.from('1234'));
+  bbs.transfers.approve(file);
+  store.limits.setDefaults({ download_ratio: 1, daily_minutes: 0 });
+  caller.clear(); caller.send('F');
+  await caller.wait('payload.bin');
+  caller.clear(); caller.send(`D ${file}`);
+  await caller.wait('Download ratio exceeded');
+  const session = [...bbs.sessions.values()].find(session => session.user?.id === user);
+  assert.notEqual(session.transferRaw, true);
+  assert.equal(store.limits.ratioUsage(user).downloaded_bytes, 0);
+  const closed = once(caller.socket, 'close');
+  store.limits.setDefaults({ download_ratio: 1, daily_minutes: 1 });
+  store.db.prepare('UPDATE caller_daily_usage SET used_ms = ? WHERE user_id = ?').run(60000, user);
+  await closed;
+  assert.match(plainText(caller.output()), /daily connection time is exhausted/);
+  const denied = await client(port);
+  t.after(() => denied.socket.destroy());
+  await denied.wait('Selection:');
+  denied.send('L'); await denied.wait(handlePrompts);
+  denied.send('Night_Owl'); await denied.wait(passwordPrompts);
+  denied.clear(); denied.send('unique test password!');
+  await denied.wait('daily connection time is exhausted');
+  assert.equal([...bbs.sessions.values()].find(session => !session.closed).user, undefined);
+  assert.equal(store.stats().calls, 1);
+  assert.deepEqual(errors, []);
+});
 
 test('socket replies use the selected base, editable default subjects and live posting checks', async t => {
   const store = new Store(':memory:'), errors = [];
@@ -451,7 +514,8 @@ test('all main sections redraw themed screens and retain shortcut/arrow selectio
     caller.clear(); caller.socket.write(key);
     await caller.wait(title);
     assert.ok(caller.output().startsWith('\x1b[0m\x1b[2J\x1b[H'), `${key} must start a fresh screen`);
-    assert.ok(caller.output().includes('\x1b[0;1;36;40m'), `${key} must have a colored prompt`);
+    const promptColor = ['U', 'L', 'M', 'D'].includes(key) ? '\x1b[0;36;40m' : '\x1b[0;1;36;40m';
+    assert.ok(caller.output().includes(promptColor), `${key} must have a colored prompt`);
     if (key === 'D') {
       caller.clear(); caller.socket.write('1');
       await caller.wait('Realm command:');
@@ -858,7 +922,7 @@ test('legacy login lightbar checks pending applications without granting access'
   caller.socket.write('\x1b[');
   caller.socket.write('B\r\n');
   await caller.wait(handlePrompts);
-  assert.ok(caller.output().includes('\x1b[0;1;7;37;40mApply for an account'));
+  assert.ok(caller.output().includes('\x1b[0;1;37;44mApply for an account'));
   caller.send('PendingCaller');
   await caller.wait(passwordPrompts);
   caller.clear(); caller.send('unique test password!');
