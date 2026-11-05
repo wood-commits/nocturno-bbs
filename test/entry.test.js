@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { readJson, writeJson } from '../src/mcp-transport.js';
 import { Store } from '../src/store.js';
+import { Presentation } from '../src/presentation.js';
 
 const entry = fileURLToPath(new URL('../src/index.js', import.meta.url));
 const noMcp = { BBS_MCP_ENDPOINT: undefined, BBS_MCP_TOKEN: undefined, BBS_MCP_SYSOP: undefined };
@@ -75,7 +76,7 @@ test('clean checkout creates its default database, loads samples and serves teln
   }
   assert.ok(output.includes(`127.0.0.1:${port}`));
   assert.ok(output.includes('Nocturno BBS'));
-  assert.ok(welcome.includes('NOCTURNO sample login matrix'));
+  assert.ok(welcome.includes(new Presentation(join(directory, 'examples', 'ansi')).render('loginmatrix', '')));
   // eslint-disable-next-line security/detect-non-literal-fs-filename
   assert.ok(existsSync(join(directory, 'data', 'bbs.sqlite')));
   assert.ok(welcome.includes('LOCAL TELNET'));

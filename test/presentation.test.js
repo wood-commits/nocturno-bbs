@@ -364,7 +364,7 @@ test('bundled legacy-style examples expand only allowed tokens and preserve sele
   assert.equal(terminal(matrix).cells[choiceRow - 1][choiceColumn - 1].fg, 15);
   assert.equal(terminal(matrix).cells[choiceRow - 1][choiceColumn - 1].bg, 4);
   assert.ok(!matrix.includes('~01'));
-  assert.ok(matrix.includes('NOCTURNO sample login matrix'));
+  assert.ok(terminal(matrix).cells[0].some(cell => cell.char.charCodeAt(0) >= 128));
   const login = art.render('login', '', { LOGINSTATUS: 'Checking', LOGINHELP: 'Safe help' });
   assert.ok(login.includes('Checking'));
   assert.ok(login.includes('Safe help'));
@@ -418,13 +418,14 @@ test('login notices keep one prompt and preserve artwork, colors and footer boun
   t.after(() => store.close());
   const view = { store, presentation: new Presentation(samples), values: {},
     strings: { selection: ui(store, 'selection') } };
+  const artwork = terminal(loginMatrix('Test', false, view));
   for (const notice of [pipeText('|12Password rejected.'), pipeText('|10' + 'X'.repeat(160)),
     'Literal |04value\x1b[2J']) {
     const frame = loginMatrix('Test', false, view, 0, notice);
     for (const immediate of [false, true]) {
       const screen = terminal(frame, { immediate, modernColors: false, wrapControl: false });
       assert.equal(screen.scrolls, 0);
-      assert.ok(screen.text.startsWith('NOCTURNO sample login matrix'));
+      assert.deepEqual(screen.cells.slice(0, 22), artwork.cells.slice(0, 22));
       assert.equal(screen.text.split('Selection:').length - 1, 1);
       assert.equal(screen.cells[22].map(cell => cell.char).join('').trimEnd(),
         plainText(safeText(notice).slice(0, 79)));
@@ -459,22 +460,23 @@ test('main artwork and generated fallback default to Messages with matching grid
   }
 });
 
-test('classic BBS terminals retain the matrix banner, DOS colors and all artwork rows', () => {
+test('classic BBS terminals retain DOS colors and all matrix artwork rows', () => {
   const presentation = new Presentation(samples);
-  // Fixed bundled artwork, never a caller-selected filesystem path.
-  // eslint-disable-next-line security/detect-non-literal-fs-filename
-  const source = readFileSync(new URL('../examples/ansi/loginmatrix.ans', import.meta.url)).toString('latin1');
+  const source = presentation.templates.get('loginmatrix');
   const reference = terminal(source);
+  const choices = ['~01', '~02', '~03', '~04', '~05'].map(marker =>
+    presentation.position('loginmatrix', marker).slice(2, -1).split(';').map(Number));
   const view = { presentation, values: {}, strings: { selection: 'Selection: ', main_prompt: 'Main command: ' } };
   for (const immediate of [false, true]) {
     for (const wrapControl of [false, true]) {
       const rendered = terminal(loginMatrix('Nocturno BBS', false, view, 2),
         { immediate, wrapControl, modernColors: false });
       assert.equal(rendered.scrolls, 0, 'art must not scroll before positioning its footer');
-      assert.ok(rendered.cells[0].map(cell => cell.char).join('').includes('NOCTURNO sample login matrix'));
+      assert.deepEqual(rendered.cells[0], reference.cells[0]);
       for (let row = 0; row < 22; row++) {
         for (let column = 0; column < 80; column++) {
-          if (row >= 4 && row <= 8 && column >= 53 && column <= 74) continue;
+          if (choices.some(([choiceRow, choiceColumn]) =>
+            row === choiceRow - 1 && column >= choiceColumn - 1 && column < choiceColumn + 21)) continue;
           assert.deepEqual(rendered.cells[row][column], reference.cells[row][column], `art cell ${row + 1},${column + 1}`);
         }
       }
@@ -631,8 +633,13 @@ test('message text begins at ~TL without stray time-left values or duplicate fit
   }
 });
 
-test('message pages preserve full overflowing fields, every body line and the header artwork', () => {
-  const presentation = new Presentation(samples);
+test('message pages preserve full overflowing fields, every body line and the header artwork', t => {
+  const path = directory(t);
+  writeTemplate(path, 'new-message-header',
+    'From: ~SN                     \r\nTo: ~RN                     \r\n' +
+    'Base: ~MA                             \r\nSubject: ~MT                                               \r\n' +
+    '\x1b[14;1H~TL');
+  const presentation = new Presentation(path);
   const row = { id: 1, handle: 'Caller', subject: 'S'.repeat(60),
     body: 'X'.repeat(160) + '\n\n' + Array.from({ length: 20 }, (_, index) => `Line ${index + 1}`).join('\n') };
   const view = { presentation, values: { MESSAGEAUTHOR: row.handle, MESSAGESUBJECT: row.subject,

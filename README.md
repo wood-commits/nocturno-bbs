@@ -1021,6 +1021,9 @@ certificate paths and isolated test cleanup. This is a lightweight SAST
 baseline, not proof of vulnerability absence.
 
 Tests use Node's native runner and real ephemeral sockets/SQLite databases.
+Bundled-artwork checks cover rendered cells, colors and footer bounds rather
+than fixed banner wording. Narrow-field fixtures separately cover overflowing
+message headers; bundled mail pagination uses the sample header's field widths.
 TLS integration requires an ephemeral certificate:
 set `BBS_TEST_CERT` and `BBS_TEST_KEY` to PEM paths for a certificate with
 `DNS:localhost`, then run `npm test`. Without these variables the TLS case is

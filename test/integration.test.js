@@ -870,7 +870,8 @@ for (const artwork of [false, true]) {
       assert.equal(screen.scrolls, 0);
       assert.ok(!frame.includes(secret));
       if (artwork) {
-        assert.ok(screen.text.startsWith('NOCTURNO sample login matrix'));
+        const artworkScreen = terminal(form.render('loginmatrix', ''), { rows: 24 });
+        assert.deepEqual(screen.cells.slice(0, 14), artworkScreen.cells.slice(0, 14));
         assert.ok(screen.cells[22].map(cell => cell.char).join('').includes(message));
         assert.ok(screen.cells[23].map(cell => cell.char).join('').includes('Selection:'));
         assert.equal(screen.row, 23);
@@ -973,7 +974,8 @@ test('TLS listener authenticates with a trusted certificate and encrypts the ses
   await register(caller, store, 'TLS_Caller');
   assert.equal(caller.socket.authorized, true);
   assert.equal(caller.socket.encrypted, true);
-  assert.match(caller.output(), /main menu/i);
+  assert.match(plainText(caller.output()), /Main command:/);
+  assert.match(plainText(caller.output()), /message menu/i);
   await bbs.close();
   assert.equal(bbs.sessions.size, 0);
   assert.ok(store.callers()[0].ended_at);
