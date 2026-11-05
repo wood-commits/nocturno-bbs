@@ -1,6 +1,7 @@
-NOCTURNO // DOOR GAMES
-%BBSNAME%
-Caller: %USERNAME%
+[0m[2J[H[94;40mNOCTURNO[37;40m [35;40m//[37;40m [35;40mDOOR[37;40m [35;40mGAMES[0m
+[96;40m%BBSNAME%[0m
+[36;40mCaller:[37;40m [96;40m%USERNAME%[0m
 
-1  Frontier Realms
-Q  Return to the main menu
+[36;40m([96;40m1[36;40m)[37;40m [96;40mFrontier[37;40m [96;40mRealms[0m
+[36;40m([96;40mQ[36;40m)[37;40m [96;40mReturn[37;40m [96;40mto[37;40m [96;40mthe[37;40m [96;40mmain[37;40m [96;40mmenu[0m
+[0m

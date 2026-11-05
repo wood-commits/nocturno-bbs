@@ -1,8 +1,18 @@
-[0;36;40mNOCTURNO // Login form
-[3;1H%BBSNAME%
-[5;1Hhandle:   ~LN
-[7;1Hpasswd:   ~LP
-[10;1H~LI
-[12;1H~LH
-[16;1HThe input markers place the cursor after these labels.
-Passwords stay hidden; the server supplies help and validation.
+[0m[2J[H[94;40mNOCTURNO[36;40m [35;40m// Login form[0m
+
+[96;40m%BBSNAME%[0m
+
+
+[36;40mhandle[96;40m:[36;40m [96;40m~LN[0m
+[36;40mpasswd[96;40m:[36;40m [96;40m~LP[0m
+       [96;40m [36;40m  [0m
+
+[96;40m~LI[0m
+
+[96;40m~LH[0m
+
+
+
+[36;40mThe input markers place the cursor after these labels.[0m
+[96;40mPasswords stay hidden[36;40m; the server supplies help and validation.[0m
+[0m

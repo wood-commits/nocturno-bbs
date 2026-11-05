@@ -1,14 +1,15 @@
-[0;36;40mNOCTURNO // Caller statistics
+[0m[2J[H[94;40mNOCTURNO[36;40m [35;40m// Caller statistics[0m
 
-%BBSNAME%
+[96;40m%BBSNAME%[0m
 
-Caller: %USERNAME%
-Access: %ACCESS%
-Calls: %CALLS%
-Posts: %POSTS%
-Mail waiting: %MAIL%
-Uploads: %UPLOADS%
-Downloads: %DOWNLOADS%
+[36;40mCaller: [96;40m%USERNAME%[0m
+[36;40mAccess: [96;40m%ACCESS%[0m
+[36;40mCalls:[96;40m %CALLS%[0m
+[36;40mPosts:[96;40m %POSTS%[0m
+[36;40mMail waiting: [96;40m%MAIL%[0m
+[36;40mUploads: [96;40m%UPLOADS%[0m
+[36;40mDownloads: [96;40m%DOWNLOADS%[0m
 
-User note:
-%USERNOTE%
+[36;40mUser note:[0m
+[96;40m%USERNOTE%[0m
+[0m

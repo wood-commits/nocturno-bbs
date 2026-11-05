@@ -1,11 +1,23 @@
-[0;37;40mNOCTURNO // Main menu
-[3;1H%BBSNAME%
-[4;1HCaller: %USERNAME%
-[7;3H                      [7;29H email         [7;55H user config   
-[9;29H user list     [9;55H files         
-[11;3H message menu  [11;29H note to sysop [11;55H qwk mail menu 
-[13;3H automessage   [13;29H page sysop    [13;55H your stats    
-[15;3H bbs list      [15;29H last callers  [15;55H oneliners     
-[17;3H doors         [17;29H autosig menu  [17;55H goodbye       
-[21;1HArrows and Enter select a label. Press ? for letter shortcuts.
-[22;1HKeep these lowercase labels intact for the generated lightbar.
+[0m[2J[H  [94;40m‹‹‹[37;40m     [94;40m‹[34;40m‹‹‹[0m
+ [34;40m [94;40m€[94;44m€≤≤[94;40m‹[37;40m   [94;40m€[94;44m∞[34;44m€[34;40m≤[0m
+ [34;40m [94;40m€[94;47m≤[94;44m€≤≤±[37;40m  [94;40m€[94;44m∞∞[34;44m€[37;40m [94;40m‹‹‹‹‹‹‹[34;40m‹‹‹‹‹≤‹‹[0m
+ [34;40m [94;40m€[94;44m€≤≤±≤±[37;40m [94;40m€[94;44m∞[34;44m€€[37;40m [94;44m€€€≤≤±±∞∞[34;44m€€€[34;40mﬂ [0m
+ [94;40m €[94;47m≤[94;44m€≤≤±±±[94;40m€[94;44m∞∞[34;44m€[37;40m [94;40mﬂﬂﬂﬂ[94;44m€≤±±[34;40mﬂﬂ   [0m
+ [94;40m €[94;47m±[94;44m≤≤[34;40m [94;40mﬁ€[94;44m±∞∞[34;44m€€[37;40m     [94;44m€[94;47m∞[94;44m±∞[34;40m [0m
+  [94;40m€[94;47m∞[94;44m€≤[34;40m [37;40m [94;40mﬁ€[94;44m±∞∞[34;44m€[37;40m     [94;44m€[94;47m±[94;44m∞∞[34;40m [37;40m     email                     user config[0m
+  [94;40m€[37;40m€[94;44m≤≤[34;40m [37;40m  [94;40mﬁ€[94;44m∞[34;44m€€[37;40m     [94;44m€[94;47m∞[94;44m∞[34;44m€[34;40m [0m
+  [94;40mﬂﬂﬂﬂ[37;40m   [94;40m €€[94;44m∞[34;44m€[37;40m     [94;44m€±∞∞[34;40m [37;40m     user list                 files[0m
+
+   message menu              note to sysop             qwk mail menu[0m
+
+   automessage               page sysop                your stats[0m
+
+   bbs list                  last callers              oneliners[0m
+
+   doors                     autosig menu              goodbye[0m
+
+
+
+[94;40mArrows[37;40m and [94;40mEnter[37;40m select a label. Press [94;40m?[37;40m for letter shortcuts.[0m
+Keep these [94;40mlabels[37;40m intact for the generated [94;40mlightbar[37;40m.[0m
+[0m
