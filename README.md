@@ -35,6 +35,15 @@ to `ansi`, edit the copies and restart. The entire local `ansi` directory,
 environment files and certificate/key files are ignored by Git. The examples
 contain no operator artwork or live data.
 
+Artwork and editable display strings share **MCI codes**: familiar `|BN` (BBS
+name), `|UH` (handle), `|ND` (node), and named extensions such as `|{MESSAGEID}`.
+Use `||` for a literal pipe and `|{NAME:24}` for a fixed-width field.
+Only `main.ans` and `message-header.ans` are loaded, using the former "new"
+screen implementations. Old filenames and percent/tilde tokens are retired.
+Saved display-string overrides migrate once automatically; private ANSI files
+must be converted before restarting. See [ANSI.md](ANSI.md#upgrading) for the
+upgrade procedure, supported codes and bounds.
+
 Connect using your telnet client to **127.0.0.1, port 2323**. For example, configure
 PuTTY's Telnet mode, automatic local echo and automatic local line editing.
 The server echoes normal input; passwords are not echoed. Clients that refuse
@@ -60,7 +69,7 @@ The main lightbar uses white-on-blue selection and clears the artwork's sample
 highlight on inactive items. Each column's bar matches its longest label plus
 one blank on either side, without moving the artwork's labels. Its prompt stays
 on row 24; no generated status
-banner is drawn over the template. Use `%BBSNAME%`/`%USERNAME%` in the artwork
+banner is drawn over the template. Use `|BN`/`|UH` in the artwork
 if you want those fields displayed.
 It initially selects **Messages (M)**, the first option in the left column.
 Returning from a section, help or artwork restores that caller's last selected
@@ -75,8 +84,12 @@ lists. Text-entry steps and validation retries remain inline so they retain
 their context. Door-game redraws also clear before displaying their content.
 Community menu, field and retry prompts leave the input cursor immediately after
 the prompt; only completed content lines end with CRLF. Default shortcut brackets
-use normal cyan, with bright keys and gray labels. Saved display-string overrides
-retain their own colors.
+use normal cyan (`|03`), bright yellow keys (`|14`) and gray labels (`|07`) on
+black, matching the stock local sysop shortcuts. Field/input labels are gray.
+Generated prompts, string-editor defaults and example ANSI prompts share this
+palette. Selected lightbars and semantic status/error colors are unchanged.
+Saved display-string overrides retain their own colors; reset an entry to adopt
+the stock palette.
 Choose `N` to apply, `C` to check an application, or `L` to log on.
 New applications require local sysop approval; existing accounts stay approved.
 Application checks require the handle and password and do not log the applicant in.
@@ -93,7 +106,7 @@ Use a unique password of 12-128 printable ASCII characters.
 New applications require entering the password twice. Both entries stay hidden;
 a mismatch clears the temporary password and asks for a new password pair before
 creating an application. `/abort` cancels either password step.
-With login artwork, handle/password entry uses the `~LN`/`~LP` field positions
+With login artwork, handle/password entry uses the `|{LOGINHANDLE}`/`|{LOGINPASSWORD}` field positions
 without printing duplicate labels. Missing fields use ordinary text prompts;
 password entry remains hidden in either mode.
 
@@ -107,12 +120,12 @@ no installed packages. Development dependencies are just lint/SAST tooling.
 - Persistent registration/login, user listing, last callers with duration,
   and role-controlled message and file bases (General is the default).
 - Optional private ANSI screen templates in `ansi`, original bundled examples,
-  sanitized per-screen placeholders,
+  sanitized per-screen MCI codes,
   and a persistent local display-string editor. See [ANSI.md](ANSI.md) for
-  filenames, supported placeholders, formats and examples.
+  filenames, supported MCI codes, formats and examples.
     All artwork templates accept DOS CP437 characters, including shading and
     box-drawing glyphs, with the same bounded ANSI control validation.
-- CP437/SAUCE legacy artwork, per-screen tilde placeholders,
+- CP437/SAUCE legacy artwork, per-screen MCI codes,
   lightbar login/main menus, and authenticated application status checks.
 - Original multiplayer **Frontier Realms** door: colorful command center,
   persistent land, gold, armies, realm development, daily turns and PvP attacks.
@@ -124,7 +137,7 @@ no installed packages. Development dependencies are just lint/SAST tooling.
   the original body. The normal posting permissions, cooldown, signature and
   editor limits apply. A removed parent cannot receive new replies, including
   replies already being composed; existing replies remain readable.
-  Public messages and private mail start at the header's `~TL` text position,
+  Public messages and private mail start at the header's `|{BODY}` text position,
   with page sizes fitted above the page indicator and prompt on rows 23-24.
   Full subjects/base names appear below the header only if they do not fit its fields.
 - Local blue sysop **waiting-for-callers** dashboard with UTC statistics and
@@ -496,7 +509,7 @@ Menu actions also default to bright cyan, editor instructions to yellow and
 save/transfer notices to light green. Saved string overrides retain their colors;
 reset an individual string with `R key` if you want its updated built-in default.
 For example, `|03S|10e|15lection|07: ` colors each part of the selection prompt.
-See [ANSI.md](ANSI.md) for limits, the full editable catalog and placeholders.
+See [ANSI.md](ANSI.md) for limits, the full editable catalog and MCI codes.
 String changes apply on the next display; ANSI files load on startup.
 Changes to users, application decisions, registration, message removal, node hangup, and menu-driven
 shutdown require typing **YES** and Enter; any other response cancels.
@@ -1073,7 +1086,7 @@ caller errors retain code-only logging.
 - `src/session.js`: authenticated session state machine.
 - `src/screens.js`: original ANSI screens, lists and sysop dashboard, with named
   layout, field-width, timing and selection-color constants.
-- `src/presentation.js`, `ansi/`, `ANSI.md`: optional screen overrides, placeholders
+- `src/presentation.js`, `ansi/`, `ANSI.md`: optional screen overrides, MCI codes
   and editable string catalog.
 - `src/doors.js`: persistent original multiplayer realm game.
 - `src/community.js`: private mail, caller preferences/signatures, community

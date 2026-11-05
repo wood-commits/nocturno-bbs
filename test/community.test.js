@@ -477,7 +477,7 @@ test('stats and email headers use trusted presentation templates with generated 
   store.setString('community_private_mail', '|11Private mail|07');
   await community.menu(caller, 'email');
   await community.handle(caller, String(mailId));
-  assert.equal(rendered[1].key, 'new-message-header');
+  assert.equal(rendered[1].key, 'message-header');
   assert.equal(rendered[1].values.RECIPIENT, 'Bob');
   assert.equal(plainText(rendered[1].values.BASENAME), 'Private mail');
   assert.ok(caller.output.includes('\x1b[0;1;36;40mPrivate mail'));

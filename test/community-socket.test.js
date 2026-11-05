@@ -12,7 +12,10 @@ import { hashPassword } from '../src/auth.js';
 import { Presentation } from '../src/presentation.js';
 import { plainText } from '../src/strings.js';
 import { tmpdir } from 'node:os';
+import { fileURLToPath } from 'node:url';
 import { terminal } from './helpers/ansi-terminal.js';
+
+const samples = fileURLToPath(new URL('../examples/ansi', import.meta.url));
 
 async function connect(port, errors) {
   const socket = net.connect({ host: '127.0.0.1', port });
@@ -39,10 +42,10 @@ async function connect(port, errors) {
       socket.write(`${line}\r\n`);
       await this.wait(marker);
     },
-    async login(handle, form = new Presentation()) {
+    async login(handle, form = new Presentation(samples)) {
       await this.wait('Selection:');
-      await this.command('L', form.position('login', '~LN') ?? 'Handle (');
-      await this.command(handle, form.position('login', '~LP') ?? 'input hidden');
+      await this.command('L', form.position('login', '|{LOGINHANDLE}') ?? 'Handle (');
+      await this.command(handle, form.position('login', '|{LOGINPASSWORD}') ?? 'input hidden');
       await this.command('socket community password!', 'Press any key');
       received = '';
       socket.write(' ');
@@ -105,7 +108,7 @@ test('real telnet community actions preserve privacy, account edits, signatures 
     const hash = await hashPassword('socket community password!');
     const aliceId = store.createUser('Alice', hash);
     const bobId = store.createUser('Bob', hash);
-    bbs = await createBbs({ store, port: 0, transferDirectory: files, onError: error => errors.push(error) });
+    bbs = await createBbs({ store, port: 0, ansiDirectory: samples, transferDirectory: files, onError: error => errors.push(error) });
     // Keep transfer payload paths isolated even when testing older server wiring.
     bbs.transfers.directory = files;
     const port = Number(bbs.endpoints[0].split(':').at(-1));

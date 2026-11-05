@@ -102,9 +102,9 @@ test('real telnet file and QWK transfers preserve binary bytes, permissions, men
   const form = new Presentation();
   await client.wait('Selection:');
   client.clear(); client.send('L');
-  await client.wait(form.position('login', '~LN') ?? 'Handle (');
+  await client.wait(form.position('login', '|{LOGINHANDLE}') ?? 'Handle (');
   client.clear(); client.send('WireCaller');
-  await client.wait(form.position('login', '~LP') ?? 'input hidden');
+  await client.wait(form.position('login', '|{LOGINPASSWORD}') ?? 'input hidden');
   client.clear(); client.send('unique transfer password!');
   await client.wait('Press any key');
   client.clear(); client.socket.write(' ');

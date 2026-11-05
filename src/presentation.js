@@ -2,6 +2,7 @@ import { openSync, fstatSync, statSync, readFileSync, closeSync } from 'node:fs'
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { InputError, text, safeText } from './validation.js';
+import { mciCode, mciTokens, mciPattern, mciWidth, validMci, isMciColor } from './mci.js';
 
 import { stringDefaults, pipeText, plainText, ui, uiText, STRING_SOURCE_LIMIT, STRING_VISIBLE_LIMIT } from './strings.js';
 export { stringDefaults, displayString } from './strings.js';
@@ -24,24 +25,18 @@ export function mainColumnWidths(labels = mainChoices.map(([, label]) => label))
   return mainChoiceGrid[0].map((_, column) =>
     Math.max(...mainChoiceGrid.map(row => row[column] === null ? 0 : plainText(labels[row[column]]).length)));
 }
-const legacyTokens = new Map([
-  ['loginmatrix', ['01', '02', '03', '04', '05']],
-  ['login', ['LN', 'LP', 'LI', 'LH']],
-  ['new-message-header', ['SN', 'RN', 'MT', 'MN', 'DT', 'MA', 'TI', 'TL']]
-]);
-const fixedScreens = new Set(['loginmatrix', 'main-new', 'login', 'stats', 'new-message-header']);
+const fixedScreens = new Set(['loginmatrix', 'main', 'login', 'stats', 'message-header']);
 export const screenTokens = new Map([
-  ['loginmatrix', common],
-  ['login', common],
+  ['loginmatrix', [...common, 'CHOICE1', 'CHOICE2', 'CHOICE3', 'CHOICE4', 'CHOICE5']],
+  ['login', [...common, 'LOGINHANDLE', 'LOGINPASSWORD', 'LOGINSTATUS', 'LOGINHELP']],
   ['stats', [...common, 'CALLS', 'POSTS', 'MAIL', 'UPLOADS', 'DOWNLOADS', 'ACCESS', 'USERNOTE']],
-  ['main-new', common],
-  ['new-message-header', [...common, 'PAGE', 'BASENAME', 'BASEID', 'MESSAGEID', 'MESSAGEAUTHOR', 'MESSAGESUBJECT', 'MESSAGEDATE']],
-  ['welcome', [...common, 'TRANSPORT', 'TAGLINE']],
   ['main', common],
+  ['message-header', [...common, 'PAGE', 'BASENAME', 'BASEID', 'MESSAGEID', 'MESSAGEAUTHOR', 'MESSAGESUBJECT', 'MESSAGEDATE',
+    'RECIPIENT', 'MESSAGEDAY', 'MESSAGETIME', 'BODY']],
+  ['welcome', [...common, 'TRANSPORT', 'TAGLINE']],
   ['users', [...common, 'PAGE']],
   ['callers', [...common, 'PAGE']],
   ['messages', [...common, 'PAGE', 'BASENAME', 'BASEID']],
-  ['message-header', [...common, 'PAGE', 'BASENAME', 'BASEID', 'MESSAGEID', 'MESSAGEAUTHOR', 'MESSAGESUBJECT', 'MESSAGEDATE']],
   ['message-bases', [...common, 'PAGE']],
   ['compose', [...common, 'BASENAME', 'BASEID']],
   ['doors', common],
@@ -49,8 +44,9 @@ export const screenTokens = new Map([
 ]);
 
 export function substitute(value, values) {
-  return value.replace(/%([A-Z]+)%/g, (token, key) =>
-    Object.hasOwn(values, key) ? safeText(values[key]).slice(0, 160) : token);
+  return String(pipeText(value, Infinity, key =>
+    Object.hasOwn(values, key) ? safeText(values[key]).slice(0, 160) :
+      /^CHOICE[1-5]$/.test(key) ? '   ' : '', true));
 }
 
 function classicColors(source) {
@@ -107,27 +103,6 @@ function fixedRows(source) {
   });
 }
 
-function legacyFields(source, pattern, render) {
-  let output = '', cursor = 0;
-  for (const match of source.matchAll(pattern)) {
-    let end = match.index + match[0].length;
-    let colors = '';
-    // Color sequences between the field and its padding consume no columns.
-    while (source[end] === '\x1b') {
-      // eslint-disable-next-line no-control-regex
-      const color = /^\x1b\[[0-9;]{0,24}m/.exec(source.slice(end));
-      if (!color) break;
-      colors += color[0];
-      end += color[0].length;
-    }
-    const padding = end;
-    while (source[end] === ' ') end++;
-    output += source.slice(cursor, match.index) + render(match[1], 3 + end - padding) + colors;
-    cursor = end;
-  }
-  return output + source.slice(cursor);
-}
-
 function cursorPosition(source) {
   let row = 1, column = 1, saved = { row, column };
   // eslint-disable-next-line no-control-regex
@@ -161,11 +136,11 @@ function sgrState(source, end) {
 
 function loginLabels(source, selected, store, values) {
   let output = source;
-  for (const match of [...source.matchAll(/~0([1-5])/g)].reverse()) {
+  for (const match of [...source.matchAll(/\|\{CHOICE([1-5])\}/g)].reverse()) {
     const start = match.index;
     const index = Number(match[1]) - 1;
     const column = cursorPosition(substitute(source.slice(0, start), values)).column;
-    let available = 3, end = start + 3;
+    let available = 3, end = start + match[0].length;
     while (available < 80 - column + 1) {
       // Labels may use blank padding across SGR changes, but never artwork glyphs.
       // eslint-disable-next-line no-control-regex
@@ -176,7 +151,7 @@ function loginLabels(source, selected, store, values) {
     }
     const width = Math.min(available, Math.max(0, 80 - column + 1));
     const label = plainText(uiText(store, loginChoices[index][1])).slice(0, width).padEnd(Math.min(3, width));
-    end = start + 3;
+    end = start + match[0].length;
     for (let consumed = 3; consumed < label.length;) {
       // eslint-disable-next-line no-control-regex
       const color = /^\x1b\[[0-9;]*m/.exec(source.slice(end));
@@ -184,7 +159,7 @@ function loginLabels(source, selected, store, values) {
       else { end++; consumed++; }
     }
     output = output.slice(0, start) +
-      `\x1b[0;${index === selected ? '1;37;44' : '37;40'}m${label}${sgrState(source, end)}` +
+      `\x1b[0;${index === selected ? '1;37;44' : '37;40'}m${label.replaceAll('|', '||')}${sgrState(source, end)}` +
       output.slice(end);
   }
   return output;
@@ -244,9 +219,10 @@ export function validateString(key, value) {
   for (const code of value.matchAll(/\|\||\|(\d{2})/g)) {
     if (code[1] && Number(code[1]) > 23) throw new InputError('string_color_error');
   }
-  const allowed = new Set([...stringDefaults.get(key).matchAll(/%([A-Z][A-Z0-9_]*)%/g)].map(match => match[1]));
-  for (const token of value.matchAll(/%([A-Z][A-Z0-9_]*)%/g)) {
-    if (!allowed.has(token[1])) throw new InputError('Unsupported string placeholder.');
+  const allowed = mciTokens(stringDefaults.get(key)).map(({ name }) => name).filter(Boolean);
+  if (/%[A-Z][A-Z0-9_]*%|~[A-Z0-9]{2}/.test(value)) throw new InputError('Unsupported string MCI code.');
+  for (const { token } of mciTokens(value)) {
+    if (!validMci(token, allowed)) throw new InputError('Unsupported string MCI code.');
   }
   return value;
 }
@@ -306,17 +282,14 @@ export class Presentation {
       if (!/^[\x20-\x7e\x80-\xfe\r\n]*$/.test(plain)) {
         throw new InputError('error_unsupported_ansi_controls_value_ans', { SCREEN: screen });
       }
-      for (const match of source.matchAll(/%([A-Z]+)%/g)) {
-        if (!tokens.includes(match[1])) throw new InputError('error_unsupported_placeholder_in_value_ans_value', { SCREEN: screen, VALUE2: match[0] });
-      }
-      for (const match of source.matchAll(/~([A-Z0-9]{2})/g)) {
-        if (!legacyTokens.get(screen)?.includes(match[1])) {
-          throw new InputError('error_unsupported_placeholder_in_value_ans_value', { SCREEN: screen, VALUE2: match[0] });
-        }
+      const oldToken = /%[A-Z][A-Z0-9_]*%|~[A-Z0-9]{2}/.exec(source);
+      if (oldToken) throw new InputError('error_unsupported_placeholder_in_value_ans_value', { SCREEN: screen, VALUE2: oldToken[0] });
+      for (const { token } of mciTokens(source)) {
+        if (!validMci(token, tokens)) throw new InputError('error_unsupported_placeholder_in_value_ans_value', { SCREEN: screen, VALUE2: token });
       }
       source = source.replace(/\r\n|\r|\n/g, '\r\n');
       source = classicColors(source);
-      if (screen === 'loginmatrix' || screen === 'main-new') {
+      if (screen === 'loginmatrix' || screen === 'main') {
         // Exported blank rows must not scroll the fixed-screen artwork.
         const rows = source.split('\r\n');
         while (rows.length > 1) {
@@ -328,15 +301,15 @@ export class Presentation {
         source = rows.join('\r\n');
       }
       if (fixedScreens.has(screen)) source = fixedRows(source);
-      const bounded = screen === 'main-new' ? mainLabels(source, 0) : source;
-      if (bounded.replace(/%[A-Z]+%|~[A-Z0-9]{2}/g, 'x'.repeat(160)).length + 512 > 32768) {
+      const bounded = screen === 'main' ? mainLabels(source, 0) : source;
+      if (bounded.replace(mciPattern(), 'x'.repeat(160)).length + 512 > 32768) {
         throw new InputError('error_expanded_ansi_file_is_too_large_value_ans', { SCREEN: screen });
       }
       this.templates.set(screen, source);
-      if (screen === 'new-message-header') {
+      if (screen === 'message-header') {
         const { row, column } = this.messagePosition();
         if (row > 20 || column > 77) {
-          throw new InputError('new-message-header.ans must leave room for message text: ~TL at row 1-20, column 1-77.');
+          throw new InputError('message-header.ans must leave room for message text: |{BODY} at row 1-20, column 1-77.');
         }
       }
     }
@@ -347,13 +320,16 @@ export class Presentation {
     if (source === undefined) return undefined;
     const index = marker === undefined ? source.length : source.indexOf(marker);
     if (index < 0) return undefined;
-    const { row, column } = cursorPosition(source.slice(0, index));
+    const prefix = source.slice(0, index).replace(mciPattern(), token =>
+      token === '||' ? '|' : isMciColor(token) ? '' :
+        ' '.repeat(Number(mciWidth(token) ?? (/^\|\{CHOICE[1-5]\}$/.test(token) ? 3 : 0))));
+    const { row, column } = cursorPosition(prefix);
     return `\x1b[${row};${column}H`;
   }
 
   messagePosition() {
-    const marker = this.position('new-message-header', '~TL');
-    const cursor = marker ?? this.position('new-message-header');
+    const marker = this.position('message-header', '|{BODY}');
+    const cursor = marker ?? this.position('message-header');
     if (!cursor) return undefined;
     const [row, column] = cursor.slice(2, -1).split(';').map(Number);
     return marker ? { row, column } : { row: row + (column > 1 ? 1 : 0), column: 1 };
@@ -361,53 +337,30 @@ export class Presentation {
 
   fieldWidth(screen, marker) {
     let result;
-    legacyFields(this.templates.get(screen) ?? '', /~([A-Z]{2})/g, (key, width) => {
-      if (`~${key}` === marker) result = width;
-      return '';
-    });
+    for (const { name, token } of mciTokens(this.templates.get(screen) ?? '')) {
+      if (mciCode(name) === marker) result = Math.max(result ?? 0, Number(mciWidth(token) ?? 160));
+    }
     return result;
   }
 
-  render(screen, fallback, values = {}, selected = screen === 'main-new' ? mainInitialSelection : 0, store) {
+  render(screen, fallback, values = {}, selected = screen === 'main' ? mainInitialSelection : 0, store) {
     let source = this.templates.get(screen);
     if (source === undefined) return fallback;
-    const literal = value => safeText(value).replaceAll('%', '\0');
     if (screen === 'loginmatrix') {
       source = loginLabels(source, selected, store, values);
-    } else if (screen === 'main-new') {
+    } else if (screen === 'main') {
       source = mainLabels(source, selected, values);
     } else if (screen === 'login') {
-      source = source.replace(/~(LN|LP|LI|LH)/g, (_, key) => literal({
-        LN: '', LP: '', LI: values.LOGINSTATUS ?? '', LH: values.LOGINHELP ?? ui(store, 'login_help')
-      }[key]));
-    } else if (screen === 'new-message-header') {
-      const aliases = {
-        SN: values.MESSAGEAUTHOR, RN: values.RECIPIENT ?? ui(store, 'label_all'), MT: values.MESSAGESUBJECT,
-        MN: values.MESSAGEID, DT: values.MESSAGEDATE?.slice(0, 10),
-        MA: values.BASENAME, TI: values.MESSAGEDATE?.slice(11, 16)
-      };
-      source = legacyFields(source, /~([A-Z]{2})/g, (key, width) => {
-        const value = safeText(aliases[key] ?? '').slice(0, width).padEnd(width);
-        return literal(value);
-      });
+      values = { ...values, LOGINHANDLE: '', LOGINPASSWORD: '',
+        LOGINSTATUS: values.LOGINSTATUS ?? '', LOGINHELP: values.LOGINHELP ?? ui(store, 'login_help') };
+    } else if (screen === 'message-header') {
+      values = { ...values, RECIPIENT: values.RECIPIENT ?? ui(store, 'label_all'),
+        MESSAGEDAY: values.MESSAGEDATE?.slice(0, 10), MESSAGETIME: values.MESSAGEDATE?.slice(11, 16), BODY: '' };
     }
-    const interactive = screen === 'loginmatrix' || screen === 'main-new';
-    // Protect literal percent signs from a second expansion across token syntaxes.
-    const expanded = classicColors(substitute(source, values).replaceAll('\0', '%'));
+    const interactive = screen === 'loginmatrix' || screen === 'main';
+    const expanded = classicColors(substitute(source, values));
     let output = `\x1b[0m\x1b[2J\x1b[H\x1b[?7l${expanded}\x1b[0m\x1b[?7h${interactive ? '' : '\r\n'}`;
     if (screen === 'stats') {
-      const fields = [['handle   :', values.USERNAME], ['usernote :', values.USERNOTE],
-        ['access level :', values.ACCESS], ['calls        :', values.CALLS],
-        ['mail waiting :', values.MAIL], ['uploads      :', values.UPLOADS],
-        ['downloads    :', values.DOWNLOADS]];
-      for (const [label, value] of fields) {
-        const cursor = this.position(screen, label);
-        if (cursor) {
-          // Leave column 80 untouched to avoid delayed-wrap surprises.
-          const column = Number(cursor.slice(cursor.indexOf(';') + 1, -1));
-          output += `${cursor}\x1b[${label.length}C${safeText(value ?? '').slice(0, Math.max(0, 80 - column - label.length))}`;
-        }
-      }
       output += '\x1b[24;1H';
     }
     if (output.length > 32768) {

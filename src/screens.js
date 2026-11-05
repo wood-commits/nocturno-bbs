@@ -93,13 +93,13 @@ export function welcome(name, secure, view) {
     (ansi.gray + '  ' + safeText(view?.values.TAGLINE ?? 'A new signal. An old-school community. Welcome to the wire.') + '\r\n' + '\r\n') +
     (ui(view?.store, secure ? 'session_tls_transport_active' : 'session_local_telnet_no_transport_encryption_use_only_locally_or_via_s') + '\r\n') +
     (ui(view?.store, 'screens_never_reuse_a_password_from_another_service_2') + '\r\n' + '\r\n') +
-    (ansi.yellow + ui(view?.store, 'screens_l_log_on_n_new_caller_q_disconnect') + ansi.reset + '\r\n' + '\r\n');
+    (ui(view?.store, 'screens_l_log_on_n_new_caller_q_disconnect') + '\r\n' + '\r\n');
   return custom('welcome', frame, view) + (view?.strings.selection ?? ui(view?.store, 'selection'));
 }
 
 export function mainMenu(name, handle, node, view, selected = mainInitialSelection) {
-  if (view?.presentation?.templates.has('main-new')) {
-    return view.presentation.render('main-new', '', view.values, selected) +
+  if (view?.presentation?.templates.has('main')) {
+    return view.presentation.render('main', '', view.values, selected) +
       `\x1b[${CALLER_SCREEN_ROWS};1H\x1b[2K` + ui(view?.store, 'main_footer', {
         PROMPT: view.strings.main_prompt.slice(0, MAIN_PROMPT_WIDTH), HELP: ui(view?.store, 'screens_arrows_enter_help')
       }, LAST_COLUMN);
@@ -152,14 +152,13 @@ export function messageLayout(view, message) {
   const details = position || message.reply_to == null ? [] :
     [ui(view?.store, 'message_reply_context', { MESSAGEID: message.reply_to })];
   if (!position) return { pageSize: (view?.messagePageSize ?? MESSAGE_BODY_LINES) - details.length, width: TEXT_WIDTH, details };
-  const source = view.presentation.templates.get('new-message-header');
-  for (const [marker, token, label, value] of [
-    ['~MA', '%BASENAME%', 'Base', view.values.BASENAME ?? 'General'],
-    ['~MT', '%MESSAGESUBJECT%', 'Subject', message.subject]
+  for (const [marker, label, value] of [
+    ['|MB', 'Base', view.values.BASENAME ?? 'General'],
+    ['|{MESSAGESUBJECT}', 'Subject', message.subject]
   ]) {
-    const width = view.presentation.fieldWidth('new-message-header', marker) ?? 0;
+    const width = view.presentation.fieldWidth('message-header', marker) ?? 0;
     const full = safeText(value);
-    if (!source.includes(token) && plainText(full).length > width) details.push(ui(view?.store, 'screens_value_value_2', { LABEL: uiText(view?.store, label), FULL: full }));
+    if (plainText(full).length > width) details.push(ui(view?.store, 'screens_value_value_2', { LABEL: uiText(view?.store, label), FULL: full }));
   }
   return { ...position, pageSize: Math.min(MESSAGE_BODY_LINES, CALLER_NOTICE_ROW - position.row - details.length),
     width: Math.min(TEXT_WIDTH, BORDER_WIDTH - position.column), details };
@@ -189,7 +188,7 @@ export function readMessage(row, page = 0, name, view, privateMail = false) {
     VALUE1: uiText(view?.store, privateMail ? 'Inbox' : 'Message list')
   }).slice(0, LAST_COLUMN);
   if (layout.row) {
-    return view.presentation.render('new-message-header', '', view.values) +
+    return view.presentation.render('message-header', '', view.values) +
       layout.details.map((line, index) => `\x1b[${layout.row + index};1H${line}`).join('') +
       content.body_lines.map((line, index) =>
         ('\x1b[' + (layout.row + layout.details.length + index) + ';' + (layout.column) + 'H  ' + (line))).join('') +

@@ -131,7 +131,7 @@ test('supplied ANSI artwork keeps every glyph and DOS palette cell in the local 
     ACCESS: 'Caller', USERNOTE: 'Note', PAGE: 1, BASENAME: 'General', BASEID: 1,
     MESSAGEID: 1, MESSAGEAUTHOR: 'Caller', MESSAGESUBJECT: 'Subject', MESSAGEDATE: '2026-11-02 12:00'
   };
-  for (const name of ['loginmatrix', 'login', 'welcome', 'main-new', 'stats', 'new-message-header']) {
+  for (const name of ['loginmatrix', 'login', 'welcome', 'main', 'stats', 'message-header']) {
     const source = presentation.render(name, '', values);
     assert.ok(source, name);
     const expected = terminal(terminalText(source), {

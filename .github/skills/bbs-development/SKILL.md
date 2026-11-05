@@ -32,7 +32,14 @@ Follow the byte-to-screen path:
 9. `src/sysop.js` owns local sysop navigation, confirmations and bounded raw-TTY
    keyboard input. It is never reachable from a caller's telnet session.
 10. `src/presentation.js` loads fixed optional ANSI templates at startup, validates
-    controls/placeholders/size and sanitizes substitutions.
+    controls/MCI codes/size and sanitizes substitutions.
+    `src/mci.js` defines shared Mystic-style |XX codes, |{NAME} extensions and
+    explicit |{NAME:width} fields (1-160); || escapes a literal pipe.
+    `src/strings.js` parses colors and values in one pass, never rescanning
+    substitutions. Stored percent-token overrides migrate transactionally once;
+    private artwork must be converted. Only main.ans/message-header.ans load,
+    using the former "new" layouts; no filename or percent/tilde aliases remain.
+    Statistics fields must be explicit, never inferred from blank labels.
     All artwork templates accept CP437 bytes and discard NUL padding;
     unsafe controls and telnet IAC remain rejected.
     See ANSI.md for per-screen tokens; list rows and message bodies stay generated.
@@ -150,7 +157,7 @@ Follow the byte-to-screen path:
   Closing registration must also stop signups already deriving a password.
 - Remote registration creates pending applications only after matching password
   entries; confirmation stays hidden,
-  reuses ~LP with ~LI instructions, and mismatches restart the password pair.
+  reuses |{LOGINPASSWORD} with |{LOGINSTATUS} instructions, and mismatches restart the password pair.
   Clear the bounded temporary password on mismatch, abort, disconnect and cleanup.
   Only local confirmed application approval enables login. Existing users migrate as approved.
   Checking application status requires password verification and never creates
@@ -249,7 +256,7 @@ Follow the byte-to-screen path:
   same page size. Editing wraps all 512 source characters and 160 visible preview
   characters into the 17-row body, separately labeled, with live counts and an
   overflow warning. Keep StyledText colors across wraps and preserve literal
-  raw pipes, per-key placeholders and trailing spaces. Editable text never changes
+  raw pipes, per-key MCI codes and trailing spaces. Editable text never changes
   commands, validation rules, authentication results or permissions.
 - Main artwork labels use explicit white-on-blue active/gray-on-black inactive
   colors with case-insensitive matching that preserves original lettering.
@@ -260,7 +267,7 @@ Follow the byte-to-screen path:
   Preserve artwork positions/glyphs across intervening SGR; use implicit trailing
   row blanks when needed, but clip for cramped layouts or the screen edge.
   The generated fallback uses the same width rule, with cell gaps outside blue.
-- Message-header `~TL` is the public/private body cursor, not remaining minutes.
+- Message-header `|{BODY}` is the public/private body cursor, not remaining minutes.
   Fit body pages above rows 23-24 (page/navigation), accounting for wrapped lines
   and full subject/base overflow fields. Only repeat fields that are missing or
   truncated. Keep rendering and N/P bounds in sync across public/private readers.
@@ -268,7 +275,7 @@ Follow the byte-to-screen path:
   handle/password label after the editor's CRLF. Handle retries redraw the form.
   Missing individual markers retain text prompts outside the artwork.
 - Legacy screens preserve CP437 bytes, normalize CRLF, strip SAUCE metadata and
-  discard NUL padding. Only allowlisted CSI and per-screen percent/tilde tokens
+  discard NUL padding. Only allowlisted CSI and per-screen MCI codes
   are accepted. Interactive footers must not scroll an 80x24 lightbar.
 - Emit classic 16-color artwork with DOS-compatible intensity/base colors and
   full SGR resets, not bright foreground/selective-reset codes alone. Guard
@@ -286,7 +293,10 @@ Follow the byte-to-screen path:
   Community output separates CRLF-terminated content from the final inline
   menu/field/retry prompt so local and remote input follows the prompt cursor.
   Default shortcut brackets use normal cyan (`|03`), bright keys and gray labels;
-  saved overrides and caller text remain literal and authoritative.
+  keys are always yellow (`|14`), including door attacks, and labels/field prompts
+  are gray (`|07`) on black. Keep code, catalog defaults and example ANSI prompts
+  consistent; preserve selected lightbars and semantic status/error colors.
+  Saved overrides, private artwork and caller text remain authoritative.
 - File payloads use generated UUID names under BBS_DATA_DIR/files, with lazy
   directory creation. Preserve approved catalogs, reserved IDs and durable
   completed transfer counts. Downloads open once, then compare descriptor and

@@ -795,7 +795,7 @@ test('system configuration manages bases, private user details, permissions and 
   console.handle('Choose: ');
   assert.equal(store.stringOverride('main_prompt'), 'Choose: ');
   console.handle('E goodbye');
-  console.handle('%USERNAME%');
+  console.handle('|UH');
   assert.ok(console.field);
   console.handle('/abort');
   console.handle('R main_prompt');
@@ -893,7 +893,7 @@ test('string editor searches catalog entries and renders saved/live color previe
 
 test('WFC labels and local validation errors use persisted editable strings', t => {
   const fixture = setup(t);
-  fixture.store.setString('wfc_title', '|10%NAME% ready|07');
+  fixture.store.setString('wfc_title', '|10|{NAME} ready|07');
   fixture.console.render();
   assert.ok(plainText(fixture.output()).includes('Test BBS ready'));
   fixture.store.setString('error_user_not_found', '|12No such caller.|07');

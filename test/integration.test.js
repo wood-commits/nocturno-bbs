@@ -17,8 +17,8 @@ import { terminal } from './helpers/ansi-terminal.js';
 const samples = fileURLToPath(new URL('../examples/ansi', import.meta.url));
 const createBbs = options => startBbs({ ansiDirectory: samples, ...options });
 const loginForm = new Presentation(samples);
-const handlePrompts = ['Handle (', loginForm.position('login', '~LN')].filter(Boolean);
-const passwordPrompts = ['Password (12-128 characters; input hidden): ', loginForm.position('login', '~LP')].filter(Boolean);
+const handlePrompts = ['Handle (', loginForm.position('login', '|{LOGINHANDLE}')].filter(Boolean);
+const passwordPrompts = ['Password (12-128 characters; input hidden): ', loginForm.position('login', '|{LOGINPASSWORD}')].filter(Boolean);
 
 async function client(port, tlsOptions) {
   const socket = tlsOptions
@@ -506,7 +506,7 @@ test('all main sections redraw themed screens and retain shortcut/arrow selectio
     ['U', 'USER LIST', 'user list'], ['F', 'FILE CATALOG', 'files'],
     ['M', 'GENERAL MESSAGE BASE', 'message menu'], ['S', 'Note line:', 'note to sysop'],
     ['K', 'QWK MAIL', 'qwk mail menu'], ['O', 'AUTOMESSAGE', 'automessage'],
-    ['P', 'Reason (160', 'page sysop'], ['T', 'Q main | Command:', 'your stats'],
+    ['P', 'Reason (160', 'page sysop'], ['T', '[Q] main | Command:', 'your stats'],
     ['B', 'BBS // PAGE', 'bbs list'], ['L', 'LAST CALLERS', 'last callers'],
     ['I', 'ONELINERS', 'oneliners'], ['D', 'DOOR GAMES', 'doors'],
     ['G', 'SIGNATURE', 'autosig menu']
@@ -514,8 +514,10 @@ test('all main sections redraw themed screens and retain shortcut/arrow selectio
     caller.clear(); caller.socket.write(key);
     await caller.wait(title);
     assert.ok(caller.output().startsWith('\x1b[0m\x1b[2J\x1b[H'), `${key} must start a fresh screen`);
-    const promptColor = ['U', 'L', 'M', 'D'].includes(key) ? '\x1b[0;36;40m' : '\x1b[0;1;36;40m';
-    assert.ok(caller.output().includes(promptColor), `${key} must have a colored prompt`);
+    const promptScreen = terminal(caller.output(), { rows: 24, palette: Array.from({ length: 16 }, (_, index) => index) });
+    const promptCell = promptScreen.cells[promptScreen.row][Math.max(0, promptScreen.column - 1)];
+    assert.equal(promptCell.fg, 7, `${key} prompt must finish in stock DOS gray`);
+    assert.equal(promptCell.bg, 0, `${key} prompt must use a black background`);
     if (key === 'D') {
       caller.clear(); caller.socket.write('1');
       await caller.wait('Realm command:');
@@ -565,9 +567,9 @@ test('socket routes custom art, message bases, live strings/permissions and mult
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   // Fixed screen names inside this test's isolated temporary directory.
   /* eslint-disable security/detect-non-literal-fs-filename */
-  writeFileSync(join(directory, 'main.ans'), 'CUSTOM MAIN %BBSNAME% %USERNAME% NODE %NODE%\n[D] Doors [M] Messages [Q] Quit');
-  writeFileSync(join(directory, 'message-header.ans'), 'CUSTOM HEADER %BASENAME% %MESSAGEAUTHOR% %MESSAGESUBJECT% #%MESSAGEID%\n');
-  writeFileSync(join(directory, 'messages.ans'), 'CUSTOM BASE %BASENAME% PAGE %PAGE%\n');
+  writeFileSync(join(directory, 'main.ans'), 'CUSTOM MAIN |BN |UH NODE |ND\n[D] Doors [M] Messages [Q] Quit');
+  writeFileSync(join(directory, 'message-header.ans'), 'CUSTOM HEADER |MB |{MESSAGEAUTHOR} |{MESSAGESUBJECT} #|{MESSAGEID}\n');
+  writeFileSync(join(directory, 'messages.ans'), 'CUSTOM BASE |MB PAGE |{PAGE}\n');
   /* eslint-enable security/detect-non-literal-fs-filename */
   const store = new Store(':memory:');
   const errors = [];
@@ -584,7 +586,7 @@ test('socket routes custom art, message bases, live strings/permissions and mult
   const firstId = store.findUser('RealmOne').id;
   const secondId = store.findUser('RealmTwo').id;
   const generalPost = store.post(firstId, 'General-only post', 'General-only body');
-  store.setString('posted', 'Saved #%MESSAGEID%!');
+  store.setString('posted', 'Saved #|{MESSAGEID}!');
   first.clear(); first.send('M');
   await first.wait('CUSTOM BASE General');
   first.clear(); first.send('B');
@@ -677,8 +679,8 @@ test('ANSI authentication fields preserve labels across handle retries and hidde
   const caller = await client(Number(bbs.endpoints[0].split(':').at(-1)));
   t.after(() => caller.socket.destroy());
   const form = new Presentation(samples);
-  const handlePosition = form.position('login', '~LN');
-  const passwordPosition = form.position('login', '~LP');
+  const handlePosition = form.position('login', '|{LOGINHANDLE}');
+  const passwordPosition = form.position('login', '|{LOGINPASSWORD}');
   assert.ok(handlePosition);
   assert.ok(passwordPosition);
   // Strip renderer-generated color/cursor sequences when checking artwork labels.
@@ -716,8 +718,8 @@ test('authentication keeps text prompts when the artwork or individual input mar
   for (const [name, source] of [
     ['no artwork', undefined],
     ['no markers', 'CUSTOM LOGIN\r\nhandle:\r\npasswd:\r\n'],
-    ['handle marker only', 'CUSTOM LOGIN\r\nhandle: ~LN\r\npasswd:\r\n'],
-    ['password marker only', 'CUSTOM LOGIN\r\nhandle:\r\npasswd: ~LP\r\n']
+    ['handle marker only', 'CUSTOM LOGIN\r\nhandle: |{LOGINHANDLE}\r\npasswd:\r\n'],
+    ['password marker only', 'CUSTOM LOGIN\r\nhandle:\r\npasswd: |{LOGINPASSWORD}\r\n']
   ]) {
     await t.test(name, async t => {
       const directory = mkdtempSync(join(tmpdir(), 'nocturno-login-'));
@@ -730,8 +732,8 @@ test('authentication keeps text prompts when the artwork or individual input mar
         writeFileSync(join(directory, 'login.ans'), source);
       }
       const form = new Presentation(directory);
-      const handlePosition = form.position('login', '~LN');
-      const passwordPosition = form.position('login', '~LP');
+      const handlePosition = form.position('login', '|{LOGINHANDLE}');
+      const passwordPosition = form.position('login', '|{LOGINPASSWORD}');
       bbs = await createBbs({ store, port: 0, ansiDirectory: directory, onError: assert.fail });
       const caller = await client(Number(bbs.endpoints[0].split(':').at(-1)));
       t.after(() => caller.socket.destroy());
@@ -761,7 +763,7 @@ for (const layout of ['generated', 'sample', 'without status marker']) {
     if (layout === 'without status marker') {
       // This fixed template belongs to the isolated test directory.
       // eslint-disable-next-line security/detect-non-literal-fs-filename
-      writeFileSync(join(directory, 'login.ans'), 'LOGIN\r\nhandle: ~LN\r\npasswd: ~LP\r\n');
+      writeFileSync(join(directory, 'login.ans'), 'LOGIN\r\nhandle: |{LOGINHANDLE}\r\npasswd: |{LOGINPASSWORD}\r\n');
     }
     const ansiDirectory = layout === 'sample' ? samples : directory;
     const store = new Store(':memory:'), errors = [];
@@ -771,8 +773,8 @@ for (const layout of ['generated', 'sample', 'without status marker']) {
     t.after(() => caller.socket.destroy());
     const session = [...bbs.sessions.values()][0];
     const form = new Presentation(ansiDirectory);
-    const handlePrompt = form.position('login', '~LN') ?? 'Handle (';
-    const passwordPrompt = form.position('login', '~LP') ?? 'Password (';
+    const handlePrompt = form.position('login', '|{LOGINHANDLE}') ?? 'Handle (';
+    const passwordPrompt = form.position('login', '|{LOGINPASSWORD}') ?? 'Password (';
     const secret = 'unique confirmation password!';
 
     async function apply() {
@@ -848,8 +850,8 @@ for (const artwork of [false, true]) {
     const caller = await client(Number(bbs.endpoints[0].split(':').at(-1)));
     t.after(() => caller.socket.destroy());
     const form = new Presentation(artwork ? samples : directory);
-    const handlePrompt = form.position('login', '~LN') ?? 'Handle (';
-    const passwordPrompt = form.position('login', '~LP') ?? 'Password (';
+    const handlePrompt = form.position('login', '|{LOGINHANDLE}') ?? 'Handle (';
+    const passwordPrompt = form.position('login', '|{LOGINPASSWORD}') ?? 'Password (';
     const secret = 'unique test password!';
 
     async function submit(command, password) {

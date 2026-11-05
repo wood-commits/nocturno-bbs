@@ -1,13 +1,13 @@
 [0m[2J[H[36;40mWelcome to[0m
-[94;40m%BBSNAME%[0m
+[94;40m|BN[0m
 
-[36;40mCaller:[94;40m %USERNAME%[0m
-[36;40mNode:[94;40m %NODE%[0m
-[94;40m%DATE%[0m
+[36;40mCaller:[94;40m |UH[0m
+[36;40mNode:[94;40m |ND[0m
+[94;40m|DA[0m
 
-[35;40m%TAGLINE%[0m
+[35;40m|{TAGLINE}[0m
 
-[35;40m%TRANSPORT%[0m
+[35;40m|{TRANSPORT}[0m
 
 [36;40mThis original sample is streamed at simulated modem speed.[0m
 [36;40mThe server supplies the any-key pause after playback.[0m

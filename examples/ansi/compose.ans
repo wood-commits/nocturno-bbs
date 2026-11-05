@@ -1,6 +1,6 @@
 [0m[2J[H[94;40mNOCTURNO[37;40m [35;40m//[37;40m [35;40mCompose[37;40m [35;40ma[37;40m [35;40mmessage[0m
-[96;40m%BBSNAME%[0m
-[36;40mBase:[37;40m [96;40m%BASENAME%[0m
+[96;40m|BN[0m
+[36;40mBase:[37;40m [96;40m|MB[0m
 
 The server supplies the subject prompt and message editor.[0m
 [0m

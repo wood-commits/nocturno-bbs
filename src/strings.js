@@ -1,4 +1,5 @@
 import { catalog } from './string-catalog.js';
+import { mciPattern, mciName, mciWidth, isMciColor } from './mci.js';
 
 export const stringDefaults = new Map(catalog);
 export const STRING_SOURCE_LIMIT = 512;
@@ -30,22 +31,34 @@ export function plainText(value) {
   return String(value).replace(sgr, '');
 }
 
-export function pipeText(source, limit = STRING_VISIBLE_LIMIT) {
+export function pipeText(source, limit = STRING_VISIBLE_LIMIT, resolve, artwork = false) {
   let foreground = 7, background = 0, column = 0, output = '', colored = false;
-  source = String(source).slice(0, STRING_SOURCE_LIMIT).replace(/[^\x20-\x7e]/g, '?');
+  source = artwork ? String(source) : String(source).slice(0, STRING_SOURCE_LIMIT).replace(/[^\x20-\x7e]/g, '?');
+  // Sticky matching keeps scanning linear; the lexer is fixed, never caller supplied.
+  // eslint-disable-next-line security/detect-non-literal-regexp
+  const tokens = new RegExp(mciPattern().source, 'y');
   for (let index = 0; index < source.length && column < limit; index++) {
-    if (source[index] === '|' && source[index + 1] === '|') {
+    tokens.lastIndex = index;
+    const match = source[index] === '|' ? tokens.exec(source) : undefined;
+    const codeText = match?.index === index ? match[0] : undefined;
+    if (codeText === '||') {
       output += '|'; index++; column++;
       continue;
     }
-    const digits = source.slice(index + 1, index + 3);
-    if (source[index] === '|' && /^\d{2}$/.test(digits) && Number(digits) <= 23) {
-      const code = Number(digits);
+    if (codeText && isMciColor(codeText)) {
+      const code = Number(codeText.slice(1));
       if (code < 16) foreground = code;
       else background = code - 16;
       output += `\x1b[0;${foreground >= 8 ? '1;' : ''}${30 + palette[foreground & 7]};${40 + palette[background]}m`;
       colored = true;
       index += 2;
+    } else if (codeText && resolve) {
+      let value = resolve(mciName(codeText), codeText);
+      const width = mciWidth(codeText);
+      if (width !== undefined) value = value.slice(0, Number(width)).padEnd(Number(width));
+      output += value;
+      column += plainText(value).length;
+      index += codeText.length - 1;
     } else { output += source[index]; column++; }
   }
   return new StyledText(output + (colored ? '\x1b[0m' : ''));
@@ -57,15 +70,18 @@ export function rawString(store, key) {
 }
 
 export function displayString(store, key, values = {}) {
-  return rawString(store, key).replace(/%([A-Z][A-Z0-9_]*)%/g, (token, name) =>
-    Object.hasOwn(values, name) ? safeText(values[name]) : token);
+  return rawString(store, key).replace(mciPattern(), token => {
+    const name = mciName(token);
+    if (!Object.hasOwn(values, name)) return token;
+    const value = safeText(values[name]);
+    const width = mciWidth(token);
+    return width === undefined ? value : value.slice(0, Number(width)).padEnd(Number(width));
+  });
 }
 
 export function ui(store, key, values = {}, width = STRING_VISIBLE_LIMIT) {
-  const template = pipeText(rawString(store, key), STRING_SOURCE_LIMIT);
-  const output = String(template).replace(/%([A-Z][A-Z0-9_]*)%/g, (token, name) =>
-    Object.hasOwn(values, name) ? String(safeText(values[name]).slice(0, STRING_SOURCE_LIMIT)) : token);
-  return new StyledText(output).slice(0, width);
+  return pipeText(rawString(store, key), STRING_SOURCE_LIMIT, (name, token) =>
+    Object.hasOwn(values, name) ? safeText(values[name]).slice(0, STRING_SOURCE_LIMIT) : token).slice(0, width);
 }
 
 let plainKeys;

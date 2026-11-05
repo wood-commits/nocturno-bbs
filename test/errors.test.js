@@ -32,9 +32,9 @@ test('startup artwork diagnostics name only allowlisted screens and reasons', t 
   let output = '';
   t.mock.method(process.stderr, 'write', data => { output += data; return true; });
   reportStartupError(new InputError('error_unsupported_placeholder_in_value_ans_value', {
-    SCREEN: 'main-new', VALUE2: 'PRIVATE_PASSWORD_TOKEN'
+    SCREEN: 'main', VALUE2: 'PRIVATE_PASSWORD_TOKEN'
   }), 'services');
-  assert.ok(output.includes('main-new.ans: An unsupported placeholder'));
+  assert.ok(output.includes('main.ans: An unsupported MCI code'));
   assert.ok(output.includes('ANSI.md'));
   assert.ok(!output.includes('PRIVATE_PASSWORD_TOKEN'));
   output = '';

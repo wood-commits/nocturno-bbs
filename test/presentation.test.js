@@ -11,6 +11,8 @@ import { Store } from '../src/store.js';
 import { InputError } from '../src/validation.js';
 import { ui, pipeText, plainText, stringDefaults, errorText, safeText } from '../src/strings.js';
 import { catalog } from '../src/string-catalog.js';
+import { mciCode, migrateMci } from '../src/mci.js';
+import { DatabaseSync } from 'node:sqlite';
 import { loginMatrix, mainMenu, readMessage, messageLayout, messagePage } from '../src/screens.js';
 
 const samples = fileURLToPath(new URL('../examples/ansi', import.meta.url));
@@ -92,8 +94,8 @@ test('Renegade pipe prompts use the DOS palette, backgrounds, escapes and reset 
   assert.equal(plainText(pipeText('||03 |||| |24')), '|03 || |24');
 });
 
-test('default menu brackets are normal cyan and shortcut keys stay bright locally and remotely', () => {
-  const entries = catalog.filter(([, source]) => source.includes('|03[|14'));
+test('all stock shortcut brackets are cyan and keys yellow locally and remotely', () => {
+  const entries = catalog.filter(([, source]) => /\[[^\]]+\]/.test(plainText(pipeText(source, 512))));
   assert.ok(entries.length > 30);
   for (const [key] of entries) {
     const frame = ui(undefined, key, { NUMBER: 1, KEY: 'E', VALUE1: 'Main menu' });
@@ -108,23 +110,158 @@ test('default menu brackets are normal cyan and shortcut keys stay bright locall
         assert.equal(remote.cells[Math.floor(offset / 80)][offset % 80].fg, 6, key);
         assert.equal(local.cells[Math.floor(offset / 80)][offset % 80].fg, '#00aaaa', key);
       }
-      const attack = key === 'doors_action_menu' && match[1] === 'A ID';
-      assert.equal(remote.cells[Math.floor((first + 1) / 80)][(first + 1) % 80].fg, attack ? 9 : 11, key);
-      assert.equal(local.cells[Math.floor((first + 1) / 80)][(first + 1) % 80].fg, attack ? '#ff5555' : '#ffff55', key);
+      for (let offset = first + 1; offset < last; offset++) {
+        assert.equal(remote.cells[Math.floor(offset / 80)][offset % 80].fg, 11, key);
+        assert.equal(local.cells[Math.floor(offset / 80)][offset % 80].fg, '#ffff55', key);
+      }
     }
+  }
+});
+
+test('stock field prompts use gray labels and leave input gray on black', () => {
+  const fields = catalog.filter(([key, source]) =>
+    /(?:_prompt(?:_2)?$|^selection$|_abort_cancels$|_characters$|^string_editor_edit$|^community_note_line$|^community_next_line_ends$)/.test(key) &&
+    (source.endsWith(': |07') || key === 'body_prompt') && !source.includes('|03[') && !source.startsWith('|12'));
+  assert.ok(fields.length > 20);
+  for (const [key] of fields) {
+    const frame = ui(undefined, key);
+    const text = plainText(frame);
+    const remote = terminal(`${frame}X`, { modernColors: false });
+    let output = '';
+    new LocalTerminal({ write: value => { output += value; } }).write(`${frame}X`);
+    const local = rgbTerminal(output);
+    for (let offset = 0; offset <= text.length; offset++) {
+      assert.equal(remote.cells[Math.floor(offset / 80)][offset % 80].fg, 7, key);
+      assert.equal(remote.cells[Math.floor(offset / 80)][offset % 80].bg, 0, key);
+      assert.equal(local.cells[Math.floor(offset / 80)][offset % 80].fg, '#aaaaaa', key);
+      assert.equal(local.cells[Math.floor(offset / 80)][offset % 80].bg, '#000000', key);
+    }
+  }
+});
+
+test('stock menu labels match the reference palette and saved prompt colors remain authoritative', t => {
+  const store = new Store(':memory:');
+  t.after(() => store.close());
+  for (const key of ['community_w_replace_q_main', 'screens_1_frontier_realms_multiplayer_strategy',
+    'session_a_welcome_artwork', 'session_value_value']) {
+    const frame = ui(store, key, { KEY: 'E', LABEL: 'Email' });
+    const text = plainText(frame);
+    const screen = terminal(String(frame), { modernColors: false });
+    const first = text.indexOf('['), last = text.indexOf(']');
+    assert.equal(screen.cells[0][first].fg, 6, key);
+    assert.equal(screen.cells[0][first + 1].fg, 11, key);
+    assert.equal(screen.cells[0][last].fg, 6, key);
+    assert.equal(screen.cells[0][last + 2].fg, 7, key);
+  }
+  store.setString('main_prompt', '|05Custom prompt: |07');
+  assert.equal(terminal(String(ui(store, 'main_prompt'))).cells[0][0].fg, 5);
+  assert.equal(store.stringOverride('main_prompt'), '|05Custom prompt: |07');
+  store.resetString('main_prompt');
+  assert.equal(terminal(String(ui(store, 'main_prompt'))).cells[0][0].fg, 7);
+});
+
+test('example ANSI prompts share the stock shortcut and field palette', () => {
+  const art = new Presentation(samples);
+  const doors = terminal(art.render('doors', ''), { modernColors: false });
+  for (const label of ['[1] Frontier Realms', '[Q] Return to the main menu']) {
+    const row = doors.cells.find(cells => cells.map(cell => cell.char).join('').includes(label));
+    const first = row.map(cell => cell.char).join('').indexOf(label);
+    assert.deepEqual(row.slice(first, first + 4).map(cell => cell.fg), [6, 11, 6, 7]);
+    assert.ok(row.slice(first + 4, first + label.length).every(cell => cell.fg === 7 && cell.bg === 0));
+  }
+  const login = terminal(art.render('login', ''), { modernColors: false });
+  for (const label of ['handle: ', 'passwd: ']) {
+    const row = login.cells.find(cells => cells.map(cell => cell.char).join('').includes(label));
+    assert.ok(row.slice(0, label.length).every(cell => cell.fg === 7 && cell.bg === 0));
   }
 });
 
 test('editable templates interpret colors only before sanitized one-pass value substitution', t => {
   const store = new Store(':memory:');
   t.after(() => store.close());
-  store.setString('posted', '|11Saved %MESSAGEID%|07');
-  const output = ui(store, 'posted', { MESSAGEID: '|04%MESSAGEID%\x1b]52;bad\x07' });
-  assert.equal(plainText(output), 'Saved |04%MESSAGEID%?]52;bad?');
+  store.setString('posted', '|11Saved |{MESSAGEID}|07');
+  const output = ui(store, 'posted', { MESSAGEID: '|04|{MESSAGEID}\x1b]52;bad\x07' });
+  assert.equal(plainText(output), 'Saved |04|{MESSAGEID}?]52;bad?');
   assert.ok(!String(output).includes('\x1b]'));
   assert.ok(!String(output).includes('\x1b[0;31;40m'));
   assert.equal(safeText('|04caller\x1b[2J'), '|04caller?[2J');
   assert.equal(plainText(safeText(output).slice(0, 8)), 'Saved |0');
+});
+
+test('artwork and editable strings share MCI colors, escaping, widths and literal substitutions', t => {
+  const path = directory(t);
+  const store = new Store(':memory:');
+  t.after(() => store.close());
+  const source = '|11ID |{MESSAGEID:5} ||UH ||{MESSAGEID}|07';
+  writeTemplate(path, 'message-header', source + '\x1b[14;1H|{BODY}');
+  store.setString('posted', source);
+  const values = { MESSAGEID: '|UH|1' };
+  const art = new Presentation(path);
+  const expected = 'ID |UH|1 |UH |{MESSAGEID}';
+  assert.ok(terminal(art.render('message-header', '', values)).text.startsWith(expected));
+  assert.equal(plainText(ui(store, 'posted', values)), expected);
+  assert.equal(terminal(String(ui(store, 'posted', values))).cells[0][0].fg, 14);
+  assert.equal(art.fieldWidth('message-header', '|{MESSAGEID}'), 5);
+  assert.equal(plainText(ui(store, 'posted', { MESSAGEID: 1 })), 'ID 1     |UH |{MESSAGEID}');
+});
+
+test('MCI validation rejects legacy, malformed, unknown and out-of-context fields', t => {
+  const path = directory(t);
+  const store = new Store(':memory:');
+  t.after(() => store.close());
+  for (const source of ['%MESSAGEID%', '~MN', '|ZZ', '|uh', '|{UNKNOWN}', '|{MESSAGEID',
+    '|{MESSAGEID:0}', '|{MESSAGEID:161}', '|{MESSAGEID:01}', '|{MESSAGEID:-1}', '|24']) {
+    writeTemplate(path, 'message-header', source);
+    assert.throws(() => new Presentation(path), InputError, source);
+    assert.throws(() => store.setString('posted', source), InputError, source);
+  }
+  writeTemplate(path, 'message-header', '|{BODY:10}');
+  assert.throws(() => new Presentation(path), InputError);
+  store.setString('posted', '||ZZ ||{UNKNOWN} |{MESSAGEID:160}');
+});
+
+test('saved percent-token overrides migrate once, persist and preserve literal pipes', t => {
+  let store;
+  t.after(() => store.close());
+  const path = directory(t), filename = join(path, 'strings.sqlite');
+  store = new Store(filename);
+  const source = '|11Saved #%MESSAGEID% |UH |||07';
+  store.db.prepare('INSERT INTO display_strings VALUES (?, ?)').run('posted', source);
+  store.db.exec('DELETE FROM display_string_migrations');
+  store.close();
+  store = new Store(filename);
+  assert.equal(store.stringOverride('posted'), '|11Saved #|{MESSAGEID} ||UH |||07');
+  assert.equal(plainText(ui(store, 'posted', { MESSAGEID: '|BN' })), 'Saved #|BN |UH |');
+  const migrated = store.stringOverride('posted');
+  store.close();
+  store = new Store(filename);
+  assert.equal(store.stringOverride('posted'), migrated);
+  assert.equal(migrateMci('literal |{NAME} |UH |04 || %USERNAME%'), 'literal ||{NAME} ||UH |04 || |UH');
+});
+
+test('oversized saved-string MCI migration rolls back without losing overrides', t => {
+  let db;
+  t.after(() => db?.close());
+  const filename = join(directory(t), 'strings.sqlite');
+  const store = new Store(filename);
+  const source = '|01'.repeat(119) + '%MESSAGEID%'.repeat(14);
+  store.db.prepare('INSERT INTO display_strings VALUES (?, ?)').run('posted', source);
+  store.db.exec('DELETE FROM display_string_migrations');
+  store.close();
+  assert.throws(() => new Store(filename), /MCI source limit/);
+  db = new DatabaseSync(filename);
+  assert.equal(db.prepare('SELECT value FROM display_strings WHERE key = ?').get('posted').value, source);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM display_string_migrations').get().count, 0);
+});
+
+test('unified main and message-header artwork do not load obsolete filenames', t => {
+  const path = directory(t);
+  writeTemplate(path, 'main-new', 'OBSOLETE');
+  writeTemplate(path, 'new-message-header', 'OBSOLETE');
+  const art = new Presentation(path);
+  assert.equal(art.render('main', 'fallback'), 'fallback');
+  assert.equal(art.render('message-header', 'fallback'), 'fallback');
+  assert.equal(art.messagePosition(), undefined);
 });
 
 test('every catalog entry is editable and validates its documented tokens and limits', t => {
@@ -137,7 +274,7 @@ test('every catalog entry is editable and validates its documented tokens and li
     assert.equal(displayString(store, key), source);
   }
   for (const source of ['|24no', '|99no', '|00|01', '|11' + 'x'.repeat(161),
-    'x'.repeat(513), '%UNKNOWN%', 'bad\r\nline']) {
+    'x'.repeat(513), '|{UNKNOWN}', 'bad\r\nline']) {
     assert.throws(() => store.setString('main_prompt', source), InputError);
   }
   store.setString('main_prompt', '||24 literal |11color|07 ');
@@ -164,7 +301,7 @@ test('colored strings persist, reset, and customize safe errors without changing
 
 test('colored substitutions respect the actual expanded ANSI output budget', t => {
   const path = directory(t);
-  writeTemplate(path, 'main', '%USERNAME%'.repeat(100));
+  writeTemplate(path, 'main', '|UH'.repeat(100));
   const art = new Presentation(path);
   assert.throws(() => art.render('main', '', {
     USERNAME: pipeText('|01'.repeat(169) + 'X')
@@ -191,12 +328,13 @@ test('optional templates fall back, expand supported sanitized values once and n
   const path = directory(t);
   const fallback = new Presentation(join(path, 'missing'));
   assert.equal(fallback.render('main', 'built-in'), 'built-in');
-  writeTemplate(path, 'main', '\x1b[36m%BBSNAME%\n%USERNAME%\r%NODE%\r\n%DATE%');
+  writeTemplate(path, 'main', '\x1b[36m|BN\n|UH\r|ND\r\n|DA');
   const art = new Presentation(path);
   const rendered = art.render('main', 'unused', {
-    BBSNAME: '%USERNAME%', USERNAME: 'Caller\x1b[2J', NODE: 2, DATE: 'today'
+    BBSNAME: '|UH', USERNAME: 'Caller\x1b[2J', NODE: 2, DATE: 'today'
   });
-  assert.ok(rendered.includes('%USERNAME%\r\nCaller?[2J\r\n2\r\ntoday'));
+  assert.ok(terminal(rendered).text.includes('|UH'));
+  assert.ok(terminal(rendered).text.includes('Caller?[2J'));
   assert.ok(!rendered.includes('Caller\x1b'));
   assert.ok(!rendered.replaceAll('\r\n', '').includes('\n'));
   assert.equal(art.render('welcome', 'default'), 'default');
@@ -205,20 +343,20 @@ test('optional templates fall back, expand supported sanitized values once and n
 test('each documented screen accepts its own tokens and rejects unsupported placeholders', t => {
   const path = directory(t);
   for (const [screen, tokens] of screenTokens) {
-    writeTemplate(path, screen, tokens.map(token => `%${token}%`).join(' '));
+    writeTemplate(path, screen, tokens.filter(token => token !== 'BODY').map(mciCode).join(' '));
   }
   const art = new Presentation(path);
   for (const [screen, tokens] of screenTokens) {
     const values = Object.fromEntries(tokens.map(token => [token, 'value']));
-    assert.ok(!art.render(screen, '', values).includes('%'));
+    assert.ok(!art.render(screen, '', values).includes('|{'));
   }
-  writeTemplate(path, 'main', '%MESSAGESUBJECT%');
-  assert.throws(() => new Presentation(path), /Unsupported placeholder/);
+  writeTemplate(path, 'main', '|{MESSAGESUBJECT}');
+  assert.throws(() => new Presentation(path), /Unsupported MCI code/);
 });
 
 test('templates reject oversized, expanding, non-regular and unsafe terminal input', t => {
   const path = directory(t);
-  for (const source of ['a'.repeat(16385), '%USERNAME%'.repeat(300),
+  for (const source of ['a'.repeat(16385), '|UH'.repeat(300),
     '\x1b]0;title\x07', '\xff', '\t', '\ufeffhello', '\x1b[6n']) {
     writeTemplate(path, 'main', source === '\xff' ? Buffer.from([255]) : source);
     assert.throws(() => new Presentation(path), InputError);
@@ -235,14 +373,14 @@ test('display strings preserve prompt spacing, validate keys and reset defaults'
   t.after(() => store.close());
   store.setString('main_prompt', 'Your command: ');
   assert.equal(displayString(store, 'main_prompt'), 'Your command: ');
-  store.setString('posted', 'Saved #%MESSAGEID%');
+  store.setString('posted', 'Saved #|{MESSAGEID}');
   assert.equal(displayString(store, 'posted', { MESSAGEID: 42 }), 'Saved #42');
-  for (const [key, value] of [['unknown', 'text'], ['main_prompt', '%USERNAME%'],
-    ['posted', '%USERNAME%'], ['goodbye', '\x1b[2J'], ['goodbye', ''], ['goodbye', 'x'.repeat(161)]]) {
+  for (const [key, value] of [['unknown', 'text'], ['main_prompt', '|UH'],
+    ['posted', '|UH'], ['goodbye', '\x1b[2J'], ['goodbye', ''], ['goodbye', 'x'.repeat(161)]]) {
     assert.throws(() => store.setString(key, value), InputError);
   }
   store.resetString('main_prompt');
-  assert.equal(displayString(store, 'main_prompt'), '|11Main command: |07');
+  assert.equal(displayString(store, 'main_prompt'), '|07Main command: |07');
 });
 
 test('all artwork templates reject unknown codes, unsafe controls and malformed metadata', t => {
@@ -282,13 +420,13 @@ test('login highlights preserve borders across color-separated padding on local 
   const lines = Array(22).fill('\x1b[0;32;40m' + '\xb2'.repeat(80));
   for (let index = 0; index < loginChoices.length; index++) {
     lines[index + 4] = '\x1b[0;1;32;42m' + '\xdb'.repeat(5) + '\x1b[0;37;40m ' +
-      `~0${index + 1}    \x1b[0;90;40m  \x1b[0;97;40m` + ' '.repeat(18) +
+      `|{CHOICE${index + 1}}    \x1b[0;90;40m  \x1b[0;97;40m` + ' '.repeat(18) +
       '\x1b[0;1;32;42m' + '\xdb'.repeat(4) + '\x1b[0m';
   }
   const source = lines.join('\r\n') + '\r\n\r\n\x1b[0m \r\n'.repeat(5);
   writeTemplate(path, 'loginmatrix', Buffer.from(source, 'latin1'));
   const presentation = new Presentation(path);
-  const reference = terminal(lines.join('\r\n'));
+  const reference = terminal(lines.join('\r\n').replace(/\|\{CHOICE[1-5]\}/g, '   '));
   const view = { presentation, values: {}, strings: { selection: 'Selection: ' } };
   for (let selected = 0; selected < loginChoices.length; selected++) {
     const frame = loginMatrix('Test', false, view, selected);
@@ -327,7 +465,7 @@ test('login highlights preserve borders across color-separated padding on local 
 
 test('login labels clip to blank artwork space and the screen edge instead of moving glyphs', t => {
   const path = directory(t);
-  writeTemplate(path, 'loginmatrix', '\x1b[1;1H~02 \x1b[0;1;32;42mX\x1b[2;75H~01   ');
+  writeTemplate(path, 'loginmatrix', '\x1b[1;1H|{CHOICE2} \x1b[0;1;32;42mX\x1b[2;75H|{CHOICE1}   ');
   const presentation = new Presentation(path);
   const frame = presentation.render('loginmatrix', '', {}, 1);
   const screen = terminal(frame, { modernColors: false, inverseControl: false });
@@ -360,35 +498,35 @@ test('bundled legacy-style examples expand only allowed tokens and preserve sele
   const art = new Presentation(samples);
   const matrix = art.render('loginmatrix', '', {}, 1);
   assert.ok(matrix.includes('Apply for an account'));
-  const [choiceRow, choiceColumn] = art.position('loginmatrix', '~02').slice(2, -1).split(';').map(Number);
+  const [choiceRow, choiceColumn] = art.position('loginmatrix', '|{CHOICE2}').slice(2, -1).split(';').map(Number);
   assert.equal(terminal(matrix).cells[choiceRow - 1][choiceColumn - 1].fg, 15);
   assert.equal(terminal(matrix).cells[choiceRow - 1][choiceColumn - 1].bg, 4);
-  assert.ok(!matrix.includes('~01'));
+  assert.ok(!matrix.includes('|{CHOICE1}'));
   assert.ok(terminal(matrix).cells[0].some(cell => cell.char.charCodeAt(0) >= 128));
   const login = art.render('login', '', { LOGINSTATUS: 'Checking', LOGINHELP: 'Safe help' });
   assert.ok(login.includes('Checking'));
   assert.ok(login.includes('Safe help'));
-  assert.ok(art.position('login', '~LN'));
-  assert.ok(art.position('login', '~LP'));
-  const menu = art.render('main-new', '', {}, 15);
+  assert.ok(art.position('login', '|{LOGINHANDLE}'));
+  assert.ok(art.position('login', '|{LOGINPASSWORD}'));
+  const menu = art.render('main', '', {}, 15);
   const menuRow = terminal(menu).cells.find(cells => cells.map(cell => cell.char).join('').includes('goodbye'));
   const menuColumn = menuRow.map(cell => cell.char).join('').indexOf('goodbye');
   assert.equal(menuRow[menuColumn].fg, 15);
   assert.equal(menuRow[menuColumn].bg, 4);
-  const header = art.render('new-message-header', '', {
+  const header = art.render('message-header', '', {
     MESSAGEAUTHOR: 'Caller\x1b[2J', RECIPIENT: 'All', MESSAGESUBJECT: 'Subject',
     MESSAGEID: 42, MESSAGEDATE: '2026-11-02 18:00', BASENAME: 'General', TIMELEFT: 55
   });
   assert.ok(header.includes('Caller?[2J'));
   assert.ok(header.includes('2026-11-02'));
   assert.ok(header.includes('18:00'));
-  assert.ok(!header.includes('~SN'));
-  const literalHeader = art.render('new-message-header', '', {
-    MESSAGESUBJECT: '%USERNAME%', USERNAME: '~SN', MESSAGEAUTHOR: '%BBSNAME%', BBSNAME: 'Not substituted'
+  assert.ok(!header.includes('|{MESSAGEAUTHOR}'));
+  const literalHeader = art.render('message-header', '', {
+    MESSAGESUBJECT: '|UH', USERNAME: '|{MESSAGEAUTHOR}', MESSAGEAUTHOR: '|BN', BBSNAME: 'Not substituted'
   });
-  assert.ok(literalHeader.includes('%USERNAME%'));
-  assert.ok(literalHeader.includes('%BBSNAME%'));
-  for (const screen of ['welcome', 'stats', 'main-new']) {
+  assert.ok(literalHeader.includes('|UH'));
+  assert.ok(literalHeader.includes('|BN'));
+  for (const screen of ['welcome', 'stats', 'main']) {
     const output = art.render(screen, '', {});
     assert.ok(!output.includes('SAUCE00'));
     assert.ok(!output.includes('\0'));
@@ -449,7 +587,7 @@ test('main artwork and generated fallback default to Messages with matching grid
   assert.equal(fallback.scrolls, 0);
   for (const [frame, label] of [
     [mainMenu('Test', 'Caller', 1), '[M] Message Menu'],
-    [new Presentation(samples).render('main-new', '', {}), 'message menu']
+    [new Presentation(samples).render('main', '', {}), 'message menu']
   ]) {
     const result = terminal(frame, { modernColors: false });
     const row = result.cells.find(cells => cells.map(cell => cell.char).join('').includes(label));
@@ -463,8 +601,8 @@ test('main artwork and generated fallback default to Messages with matching grid
 test('classic BBS terminals retain DOS colors and all matrix artwork rows', () => {
   const presentation = new Presentation(samples);
   const source = presentation.templates.get('loginmatrix');
-  const reference = terminal(source);
-  const choices = ['~01', '~02', '~03', '~04', '~05'].map(marker =>
+  const reference = terminal(source.replace(/\|\{CHOICE[1-5]\}/g, '   '));
+  const choices = ['|{CHOICE1}', '|{CHOICE2}', '|{CHOICE3}', '|{CHOICE4}', '|{CHOICE5}'].map(marker =>
     presentation.position('loginmatrix', marker).slice(2, -1).split(';').map(Number));
   const view = { presentation, values: {}, strings: { selection: 'Selection: ', main_prompt: 'Main command: ' } };
   for (const immediate of [false, true]) {
@@ -491,8 +629,8 @@ test('every main lightbar selection has DOS-safe contrast without modifying surr
   const presentation = new Presentation(samples);
   // Fixed bundled artwork, never a caller-selected filesystem path.
   // eslint-disable-next-line security/detect-non-literal-fs-filename
-  const source = readFileSync(new URL('../examples/ansi/main-new.ans', import.meta.url)).toString('latin1');
-  const reference = terminal(source);
+  const source = readFileSync(new URL('../examples/ansi/main.ans', import.meta.url)).toString('latin1');
+  const reference = terminal(String(pipeText(source, Infinity, undefined, true)));
   const view = { presentation, values: {}, strings: { main_prompt: 'Main command: ' } };
   const labels = mainChoices.map(([, label]) => {
     const row = reference.cells.findIndex(line => line.map(cell => cell.char).join('').toLowerCase().includes(label.toLowerCase()));
@@ -548,11 +686,11 @@ test('main artwork matches every label case-insensitively and preserves its orig
     const labels = mainChoices.map(([, label]) => style(label));
     const source = mainChoiceGrid.map(row => row.map(index => index === null ? ' '.repeat(25) :
       ` \x1b[32m${labels[index]}${' '.repeat(24 - labels[index].length)}`).join('')).join('\r\n');
-    writeTemplate(path, 'main-new', source);
+    writeTemplate(path, 'main', source);
     const presentation = new Presentation(path);
     const reference = terminal(source);
     for (let selected = 0; selected < mainChoices.length; selected++) {
-      const rendered = terminal(presentation.render('main-new', '', {}, selected), { modernColors: false });
+      const rendered = terminal(presentation.render('main', '', {}, selected), { modernColors: false });
       assert.equal(rendered.scrolls, 0);
       for (const [index, label] of labels.entries()) {
         const row = mainChoiceGrid.findIndex(items => items.includes(index));
@@ -594,16 +732,16 @@ test('fallback lightbars use padded column widths rather than highlighting the e
 
 test('padded custom lightbars preserve neighboring glyphs, SGR state and the screen edge', t => {
   const path = directory(t);
-  writeTemplate(path, 'main-new', '\x1b[32mX \x1b[31memail\x1b[36m Y');
-  const framed = terminal(new Presentation(path).render('main-new', '', {}, 0), { modernColors: false });
+  writeTemplate(path, 'main', '\x1b[32mX \x1b[31memail\x1b[36m Y');
+  const framed = terminal(new Presentation(path).render('main', '', {}, 0), { modernColors: false });
   assert.ok(framed.text.startsWith('X email Y'));
   assert.deepEqual(framed.cells[0][0], { char: 'X', fg: 2, bg: 0 });
   assert.deepEqual(framed.cells[0][1], { char: ' ', fg: 15, bg: 4 });
   assert.deepEqual(framed.cells[0][7], { char: ' ', fg: 15, bg: 4 });
   assert.deepEqual(framed.cells[0][8], { char: 'Y', fg: 6, bg: 0 });
-  writeTemplate(path, 'main-new', '\x1b[24;1H%BBSNAME% goodbye');
+  writeTemplate(path, 'main', '\x1b[24;1H|BN goodbye');
   for (const immediate of [false, true]) {
-    const edge = terminal(new Presentation(path).render('main-new', '', { BBSNAME: 'X'.repeat(71) }, 15),
+    const edge = terminal(new Presentation(path).render('main', '', { BBSNAME: 'X'.repeat(71) }, 15),
       { immediate, modernColors: false, wrapControl: false });
     assert.equal(edge.scrolls, 0);
     assert.equal(edge.cells[23][71].bg, 4);
@@ -612,7 +750,7 @@ test('padded custom lightbars preserve neighboring glyphs, SGR state and the scr
   }
 });
 
-test('message text begins at ~TL without stray time-left values or duplicate fitting fields', () => {
+test('message text begins at |{BODY} without stray time-left values or duplicate fitting fields', () => {
   const presentation = new Presentation(samples);
   const row = { id: 1, handle: 'Caller', subject: 'Short subject',
     body: Array.from({ length: 20 }, (_, index) => `Body line ${index + 1}`).join('\n'), created_at: '2026-11-02T18:00:00Z' };
@@ -635,10 +773,10 @@ test('message text begins at ~TL without stray time-left values or duplicate fit
 
 test('message pages preserve full overflowing fields, every body line and the header artwork', t => {
   const path = directory(t);
-  writeTemplate(path, 'new-message-header',
-    'From: ~SN                     \r\nTo: ~RN                     \r\n' +
-    'Base: ~MA                             \r\nSubject: ~MT                                               \r\n' +
-    '\x1b[14;1H~TL');
+  writeTemplate(path, 'message-header',
+    'From: |{MESSAGEAUTHOR:24}\r\nTo: |{RECIPIENT:24}\r\n' +
+    'Base: |{BASENAME:32}\r\nSubject: |{MESSAGESUBJECT:50}\r\n' +
+    '\x1b[14;1H|{BODY}');
   const presentation = new Presentation(path);
   const row = { id: 1, handle: 'Caller', subject: 'S'.repeat(60),
     body: 'X'.repeat(160) + '\n\n' + Array.from({ length: 20 }, (_, index) => `Line ${index + 1}`).join('\n') };
@@ -649,7 +787,7 @@ test('message pages preserve full overflowing fields, every body line and the he
   const expected = [...Array(2).fill('X'.repeat(76)), 'X'.repeat(8), '',
     ...Array.from({ length: 20 }, (_, index) => `Line ${index + 1}`)];
   const { pages } = messagePage(row.body, 0, layout.pageSize, layout.width);
-  const reference = terminal(presentation.render('new-message-header', '', view.values));
+  const reference = terminal(presentation.render('message-header', '', view.values));
   for (const immediate of [false, true]) {
     const displayed = [];
     for (let page = 0; page < pages; page++) {
@@ -693,7 +831,7 @@ test('reply context retains color without changing template body pagination or p
 
 test('legacy message-header templates still show generated reply context', t => {
   const path = directory(t);
-  writeTemplate(path, 'message-header', 'Legacy header: %MESSAGESUBJECT%\r\n');
+  writeTemplate(path, 'message-header', 'Legacy header: |{MESSAGESUBJECT}\r\n');
   const row = { id: 2, subject: 'Re: Original', body: 'Reply body', reply_to: 1 };
   const view = { presentation: new Presentation(path), values: { MESSAGESUBJECT: row.subject } };
   const screen = terminal(readMessage(row, 0, 'BBS', view));
@@ -704,9 +842,9 @@ test('legacy message-header templates still show generated reply context', t => 
   assert.equal(screen.scrolls, 0);
 });
 
-test('message templates without ~TL start text after the art and reject layouts without body space', t => {
+test('message templates without |{BODY} start text after the art and reject layouts without body space', t => {
   const path = directory(t);
-  writeTemplate(path, 'new-message-header', 'Header: ~MT\r\n');
+  writeTemplate(path, 'message-header', 'Header: |{MESSAGESUBJECT}\r\n');
   const presentation = new Presentation(path);
   const row = { id: 1, subject: 'Short', body: 'Body' };
   const view = { presentation, values: { MESSAGESUBJECT: row.subject, BASENAME: 'General' } };
@@ -715,7 +853,7 @@ test('message templates without ~TL start text after the art and reject layouts 
   assert.equal(frame.scrolls, 0);
   assert.ok(frame.text.includes('Body'));
   for (const position of ['21;1', '14;78', '24;1']) {
-    writeTemplate(path, 'new-message-header', `\x1b[${position}H~TL`);
+    writeTemplate(path, 'message-header', `\x1b[${position}H|{BODY}`);
     assert.throws(() => new Presentation(path), /must leave room for message text/);
   }
 });
@@ -723,11 +861,11 @@ test('message templates without ~TL start text after the art and reject layouts 
 test('lightbar colors restore extended-color state and remain inside the expanded-output budget', t => {
   const path = directory(t);
   const colors = '\x1b[38;5;92;48;2;1;2;3m';
-  writeTemplate(path, 'main-new', `${colors}email After`);
-  const frame = new Presentation(path).render('main-new', '');
+  writeTemplate(path, 'main', `${colors}email After`);
+  const frame = new Presentation(path).render('main', '');
   assert.ok(frame.includes(`email\x1b[0m${colors} After`));
   assert.ok(frame.length <= 32768);
-  writeTemplate(path, 'main-new', '\x1b[38;5;92m'.repeat(500) + mainChoices.map(([, label]) => label).join(' '));
+  writeTemplate(path, 'main', '\x1b[38;5;92m'.repeat(500) + mainChoices.map(([, label]) => label).join(' '));
   assert.throws(() => new Presentation(path), /Expanded ANSI file is too large/);
 });
 

@@ -23,17 +23,19 @@ const knownStartupReasons = new Map([
   ['MCP requires a local IPC endpoint.', 'BBS_MCP_ENDPOINT must be a valid local IPC endpoint, not a network address.'],
   ['Invalid MCP sysop flag.', 'The MCP sysop flag must be a boolean.'],
   ['The local ansi path must be a directory.', 'The local ansi path exists but is not a directory.'],
+  ['Saved display string exceeds the MCI source limit after migration.',
+    'A saved display string exceeds 512 source characters after MCI conversion. The migration was rolled back; shorten the override using the previous version before upgrading.'],
   ['Unsupported or damaged password hash', 'A stored password hash is unsupported or damaged. Check database integrity; do not edit credential fields manually.'],
-  ['new-message-header.ans must leave room for message text: ~TL at row 1-20, column 1-77.',
-    'new-message-header.ans: ~TL must be on rows 1-20, columns 1-77 to leave room for message text.']
+  ['message-header.ans must leave room for message text: |{BODY} at row 1-20, column 1-77.',
+    'message-header.ans: |{BODY} must be on rows 1-20, columns 1-77 to leave room for message text.']
 ]);
 const artworkReasons = new Map([
   ['error_invalid_ansi_file_value_ans_maximum_16_kib', 'The template must be a regular file no larger than 16 KiB.'],
   ['error_ansi_files_must_not_have_a_bom_value_ans', 'Remove the UTF-8 BOM; save as ASCII or DOS CP437.'],
   ['error_invalid_sauce_metadata_value_ans', 'The trailing SAUCE metadata or comment block is malformed.'],
   ['error_unsupported_ansi_controls_value_ans', 'Unsupported terminal controls or telnet IAC bytes; only the ANSI.md allowlist is accepted.'],
-  ['error_unsupported_placeholder_in_value_ans_value', 'An unsupported placeholder was found. Check this screen\'s tokens in ANSI.md.'],
-  ['error_expanded_ansi_file_is_too_large_value_ans', 'The expanded artwork exceeds the 32 KiB output limit. Reduce artwork or placeholders.']
+  ['error_unsupported_placeholder_in_value_ans_value', 'An unsupported MCI code was found. Check this screen\'s codes in ANSI.md.'],
+  ['error_expanded_ansi_file_is_too_large_value_ans', 'The expanded artwork exceeds the 32 KiB output limit. Reduce artwork or MCI codes.']
 ]);
 const systemStartupReasons = new Map([
   ['EADDRINUSE', 'A configured port or local IPC endpoint is already in use. Change the configured endpoint or stop its owning service.'],

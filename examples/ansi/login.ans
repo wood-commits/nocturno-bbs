@@ -1,15 +1,15 @@
 [0m[2J[H[94;40mNOCTURNO[36;40m [35;40m// Login form[0m
 
-[96;40m%BBSNAME%[0m
+[96;40m|BN[0m
 
 
-[36;40mhandle[96;40m:[36;40m [96;40m~LN[0m
-[36;40mpasswd[96;40m:[36;40m [96;40m~LP[0m
+|07handle: |{LOGINHANDLE}
+|07passwd: |{LOGINPASSWORD}
        [96;40m [36;40m  [0m
 
-[96;40m~LI[0m
+[96;40m|{LOGINSTATUS}[0m
 
-[96;40m~LH[0m
+[96;40m|{LOGINHELP}[0m
 
 
 

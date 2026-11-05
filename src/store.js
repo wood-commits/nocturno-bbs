@@ -8,6 +8,8 @@ import { initializeCommunity } from './community.js';
 import { initializeTransfers } from './transfers.js';
 import { Access, initializeAccess } from './access.js';
 import { Limits } from './limits.js';
+import { migrateMci } from './mci.js';
+import { STRING_SOURCE_LIMIT } from './strings.js';
 
 export class Store {
   constructor(filename) {
@@ -69,7 +71,25 @@ export class Store {
       );
       INSERT OR IGNORE INTO message_bases(id, name, description) VALUES (1, 'General', 'Public discussion');
       CREATE TABLE IF NOT EXISTS display_strings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS display_string_migrations (version INTEGER PRIMARY KEY);
     `);
+    if (!this.db.prepare('SELECT version FROM display_string_migrations WHERE version = 1').get()) {
+      this.db.exec('BEGIN IMMEDIATE');
+      try {
+        const update = this.db.prepare('UPDATE display_strings SET value = ? WHERE key = ?');
+        for (const { key, value } of this.db.prepare('SELECT key, value FROM display_strings').all()) {
+          const migrated = migrateMci(value);
+          if (migrated.length > STRING_SOURCE_LIMIT) throw new InputError('Saved display string exceeds the MCI source limit after migration.');
+          update.run(migrated, key);
+        }
+        this.db.prepare('INSERT INTO display_string_migrations VALUES (1)').run();
+        this.db.exec('COMMIT');
+      } catch (error) {
+        this.db.exec('ROLLBACK');
+        this.db.close();
+        throw error;
+      }
+    }
     const userColumns = this.db.prepare('PRAGMA table_info(users)').all();
     if (!userColumns.some(item => item.name === 'application_status')) {
       this.db.exec("ALTER TABLE users ADD COLUMN application_status TEXT NOT NULL DEFAULT 'approved' CHECK (application_status IN ('pending', 'approved', 'rejected'))");

@@ -337,7 +337,7 @@ export class Session extends EventEmitter {
   prompt() {
     if (this.state.endsWith('handle') || this.state.endsWith('password')) {
       const handle = this.state.endsWith('handle');
-      const position = this.presentation?.position('login', handle ? '~LN' : '~LP');
+      const position = this.presentation?.position('login', handle ? '|{LOGINHANDLE}' : '|{LOGINPASSWORD}');
       if (position) return position;
       const prefix = this.presentation?.templates.has('login') ? '\x1b[23;1H\x1b[2K' : handle ? '\r\n' : '';
       return prefix + ui(this.store, handle ? 'handle_prompt' :
@@ -356,7 +356,7 @@ export class Session extends EventEmitter {
       this.state.startsWith('status') ? ui(this.store, 'session_check_application') : ui(this.store, 'label_login');
     this.write(this.presentation?.render('login', '', this.view({ LOGINSTATUS: error ?? status }).values) ?? '');
     const notice = error ?? (confirming && this.presentation?.templates.has('login') ? status : undefined);
-    if (notice && !this.presentation?.position('login', '~LI')) {
+    if (notice && !this.presentation?.position('login', '|{LOGINSTATUS}')) {
       this.write(`${this.presentation?.templates.has('login') ? '\x1b[22;1H\x1b[2K' : '\r\n'}${notice}\r\n`);
     }
     this.write(this.prompt());
