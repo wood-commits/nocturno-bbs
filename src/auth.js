@@ -85,10 +85,28 @@ export class Auth {
       const user = this.store.findUser(handle);
       const valid = await verifyPassword(secret, user?.password_hash ?? this.dummy);
       const current = user && this.store.user(user.id);
-      if (!current || current.disabled || !valid) throw new InputError('Invalid handle or password.');
+      // A password changed while this derivation ran must not authenticate the old one.
+      const unchanged = user && this.store.passwordHash(user.id) === user.password_hash;
+      if (!current || current.disabled || !valid || !unchanged) throw new InputError('Invalid handle or password.');
       if (statusOnly) return { status: current.application_status };
       if (current.application_status !== 'approved') throw new InputError('Application not approved. Use Check application.');
-      return { id: current.id, handle: current.handle };
+      return { id: current.id, handle: current.handle, credentialVersion: user.credential_version };
+    });
+  }
+
+  // Authenticated self-service change. Requires the current password, shares the
+  // address limiter and derivation cap, and returns the new credential version.
+  async changePassword(userId, current, next, address) {
+    password(current);
+    password(next);
+    if (current === next) throw new InputError('error_new_password_must_differ');
+    return this.run(address, async () => {
+      const hash = this.store.passwordHash(userId);
+      const valid = await verifyPassword(current, hash || this.dummy);
+      const user = this.store.user(userId);
+      if (!hash || !user || user.disabled || user.application_status !== 'approved') throw new InputError('Account unavailable.');
+      if (!valid) throw new InputError('error_current_password_incorrect');
+      return this.store.setPassword(userId, hash, await hashPassword(next));
     });
   }
 

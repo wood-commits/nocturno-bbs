@@ -1,5 +1,5 @@
 import { ui, uiText, errorText } from './strings.js';
-import { InputError, text, messageBody, username, safeText } from './validation.js';
+import { InputError, text, messageBody, username, password, safeText } from './validation.js';
 import { heading, messageLayout, messagePage, readMessage } from './screens.js';
 import { AttemptLimiter, addressKey } from './auth.js';
 
@@ -334,7 +334,8 @@ export class Community {
       const profile = this.config(userId);
       lines.push(ui(this.store, 'community_private_real_name_value', { REAL_NAME: profile.real_name }), ui(this.store, 'community_private_location_value', { LOCATION: profile.location }),
         ui(this.store, 'community_own_stats_note_value', { USER_NOTE: profile.user_note }),
-        ui(this.store, 'community_r_real_name_l_location_n_own_stats_note_q_main_your_profile_is'));
+        ui(this.store, 'community_r_real_name_l_location_n_own_stats_note_q_main_your_profile_is'),
+        ui(this.store, 'community_p_change_password'));
     } else if (data.feature === 'signature') {
       lines.push(ui(this.store, 'community_signature_value', { USER_ID: this.signature(userId) }), ui(this.store, 'community_e_edit_q_main_appended_to_public_posts_only'));
     } else if (data.feature === 'automessage') {
@@ -431,6 +432,7 @@ export class Community {
       data.readPage = Math.max(0, Math.min(data.readPages - 1, data.readPage + (command === 'N' ? 1 : -1)));
       return this.showMail(session);
     }
+    if (data.step?.startsWith('password-')) return this.passwordStep(session, line);
     if (data.step) {
       if (data.step === 'mail-handle') {
         username(line);
@@ -476,6 +478,11 @@ export class Community {
       data.step = 'mail-handle';
       output(session, [], ui(this.store, 'community_recipient_handle'));
       return;
+    } else if (data.feature === 'config' && command === 'P') {
+      // Hidden entry: the session never echoes input while communityState.secret is set.
+      Object.assign(data, { step: 'password-current', secret: true });
+      output(session, [], ui(this.store, 'community_current_password_prompt'));
+      return;
     } else if (data.feature === 'config' && ['R', 'L', 'N'].includes(command)) {
       data.field = command === 'R' ? 'real_name' : command === 'L' ? 'location' : 'user_note';
       data.step = 'profile';
@@ -491,6 +498,60 @@ export class Community {
       return;
     } else if (command !== '?') throw new InputError('Unknown community command.');
     this.show(session);
+  }
+
+  async passwordStep(session, line) {
+    try { await this.passwordInput(session, line); }
+    catch (error) {
+      if (!(error instanceof InputError)) throw error;
+      // Repeat the prompt for the step that now expects input.
+      const prompt = new Map([['password-current', 'community_current_password_prompt'],
+        ['password-new', 'community_new_password_prompt']]).get(session.communityState?.step);
+      output(session, [errorText(this.store, error)], ui(this.store, prompt ?? 'retry_prompt'));
+    }
+  }
+
+  async passwordInput(session, line) {
+    const data = session.communityState;
+    if (data.step === 'password-current') {
+      password(line);
+      data.currentPassword = line;
+      data.step = 'password-new';
+      output(session, [], ui(this.store, 'community_new_password_prompt'));
+      return;
+    }
+    if (data.step === 'password-new') {
+      password(line);
+      data.newPassword = line;
+      data.step = 'password-confirm';
+      output(session, [], ui(this.store, 'community_confirm_new_password_prompt'));
+      return;
+    }
+    const { currentPassword, newPassword } = data;
+    // Never keep candidate passwords beyond this attempt, whatever its outcome.
+    data.currentPassword = data.newPassword = undefined;
+    if (line !== newPassword) {
+      data.currentPassword = currentPassword;
+      data.step = 'password-new';
+      throw new InputError('error_passwords_do_not_match');
+    }
+    data.step = 'password-current';
+    let version;
+    try {
+      version = await session.auth.changePassword(session.user.id, currentPassword, newPassword, session.socket?.remoteAddress);
+    } catch (error) {
+      // Counted per connection so /abort cannot reset it; the address limiter also applies.
+      if (error?.stringKey === 'error_current_password_incorrect' &&
+          (session.passwordChangeFailures = (session.passwordChangeFailures ?? 0) + 1) >= 3) {
+        session.disconnect(ui(this.store, 'session_too_many_password_change_attempts'));
+        return;
+      }
+      throw error;
+    }
+    if (session.closed) return;
+    session.credentialVersion = version;
+    session.emit('password-changed', session.user.id);
+    await this.menu(session, 'config', ui(this.store, 'community_password_changed'));
   }
 
   showMail(session) {

@@ -8,6 +8,7 @@ import { Community } from './community.js';
 import { Transfers } from './transfers.js';
 import { LocalSocket } from './local-terminal.js';
 import { reportError } from './errors.js';
+import { ui } from './strings.js';
 
 export async function createBbs({ store, name = 'Nocturno BBS', port = 2323,
   tlsOptions, tlsPort = 9923, tlsHost = '127.0.0.1', onError = reportError, ansiDirectory, transferDirectory }) {
@@ -30,6 +31,15 @@ export async function createBbs({ store, name = 'Nocturno BBS', port = 2323,
     const id = nextId++;
     const session = new Session({ socket, store, auth, id, name, secure, onError, presentation, community, transfers, local });
     sessions.set(id, session);
+    // A password change ends every other session for that account at once,
+    // including idle ones and active transfers.
+    session.on('password-changed', userId => {
+      for (const other of sessions.values()) {
+        if (other !== session && other.user?.id === userId) {
+          other.disconnect(ui(store, 'session_password_changed_elsewhere'));
+        }
+      }
+    });
     socket.once('close', () => sessions.delete(id));
     return session;
   };

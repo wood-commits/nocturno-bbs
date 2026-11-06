@@ -608,6 +608,15 @@ Enter. `?` immediately displays this list in the BBS.
 - **C:** `R` edits your real name, `L` your location, `N` your own statistics
   note. Each accepts 60 printable characters; `-` clears it. These fields are
   private. Your statistics note is separate from the local-only sysop note.
+  `P` changes your password: enter your current password, then the new one
+  twice (12-128 printable characters, different from the current one). All three
+  entries are hidden, never echoed or mirrored to node watchers, and are kept
+  only until the change is attempted. A mismatched confirmation asks for the new
+  password again; `/abort` cancels. Changes share the login limiter (10 attempts
+  per address per 15 minutes) and derivation cap; three incorrect current
+  passwords in one connection disconnect it, even across `/abort`. A successful
+  change immediately disconnects every other session for the account, and a login
+  still verifying the old password fails.
 - **G:** `E` edits your 160-character signature; `-` clears it. Signatures are
   appended to online public posts and count toward their line/character limits.
 - **O:** `W` replaces the current 160-character public automessage.
@@ -1030,7 +1039,8 @@ proxy, or reuse credentials from other systems.
   local user who can modify an approved file's contents in place.
 
 This is a **single-process starter**, not a hardened public hosting platform.
-There is no password recovery, caller self-service account removal, per-account lockout, or
+Callers can change their own password (User Config `P`), but there is no password
+recovery or sysop password reset, caller self-service account removal, per-account lockout, or
 distributed rate limiting. Schema upgrades are additive, not a general migration
 framework. Use a dedicated
 unprivileged service account, firewall, private data directory, and disk quotas.

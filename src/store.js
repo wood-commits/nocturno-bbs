@@ -63,6 +63,9 @@ export class Store {
     if (!this.db.prepare('PRAGMA table_info(users)').all().some(column => column.name === 'deleted')) {
       this.db.exec('ALTER TABLE users ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0 CHECK (deleted IN (0, 1))');
     }
+    if (!this.db.prepare('PRAGMA table_info(users)').all().some(column => column.name === 'credential_version')) {
+      this.db.exec('ALTER TABLE users ADD COLUMN credential_version INTEGER NOT NULL DEFAULT 0 CHECK (credential_version >= 0)');
+    }
     if (!this.db.prepare('PRAGMA table_info(messages)').all().some(column => column.name === 'removed')) {
       this.db.exec('ALTER TABLE messages ADD COLUMN removed INTEGER NOT NULL DEFAULT 0 CHECK (removed IN (0, 1))');
     }
@@ -192,6 +195,25 @@ export class Store {
   user(id) {
     return this.db.prepare(`SELECT id, handle, disabled, created_at, last_login,
       can_post, can_doors, real_name, location, sysop_note, application_status, role_id FROM users WHERE id = ? AND deleted = 0`).get(id);
+  }
+
+  // Credential internals are never part of user projections.
+  passwordHash(id) {
+    return this.db.prepare('SELECT password_hash FROM users WHERE id = ? AND deleted = 0').get(id)?.password_hash;
+  }
+
+  credentialVersion(id) {
+    return this.db.prepare('SELECT credential_version FROM users WHERE id = ? AND deleted = 0').get(id)?.credential_version;
+  }
+
+  // Replaces the hash only if it is still the one that was verified, so two
+  // concurrent changes cannot both succeed. Returns the new credential version.
+  setPassword(id, expectedHash, hash) {
+    const row = this.db.prepare(`UPDATE users SET password_hash = ?, credential_version = credential_version + 1
+      WHERE id = ? AND password_hash = ? AND deleted = 0 AND disabled = 0 AND application_status = 'approved'
+      RETURNING credential_version`).get(hash, id, expectedHash);
+    if (!row) throw new InputError('Account unavailable.');
+    return row.credential_version;
   }
 
   sysopUsers(page = 0) {

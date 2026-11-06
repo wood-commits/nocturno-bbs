@@ -294,6 +294,16 @@ Follow the byte-to-screen path:
   full SGR resets, not bright foreground/selective-reset codes alone. Guard
   autowrap and re-anchor fixed-screen rows before CRLF; immediate column-80
   wrapping must not add blank rows. Preserve all 22 login artwork rows.
+- User Config P changes the caller's password via Auth.changePassword: current
+  password required, shared address limiter/derivation cap, new != current.
+  Entry is hidden through communityState.secret (only while in a community state);
+  candidate passwords are cleared before the attempt and on cleanup. Store.setPassword
+  swaps the hash only if it still matches the verified one and bumps
+  users.credential_version (additive). The changing session adopts the new version;
+  server disconnects the account's other sessions on 'password-changed', and
+  Session.handle disconnects any session whose captured version is stale. Login
+  rejects a hash replaced during derivation. Three wrong current passwords per
+  connection disconnect (session-scoped, survives /abort). Never expose hashes.
 - Mail and private profile fields are caller-owned, never public list fields.
   Bind mail drafts to the recipient's immutable user ID at handle selection.
   Send by ID and revalidate approval/enabled status; never resolve the handle

@@ -32,7 +32,8 @@ export class Session extends EventEmitter {
       mode: () => this.transferRaw ? 'raw' : this.welcomePlayback ? 'key' :
         !this.busy && ['welcome', 'main', 'post-welcome', 'art'].includes(this.state) ? 'key' : 'line',
       shortcuts: () => this.busy || this.shortcut ? '' : this.shortcuts(),
-      secret: () => this.busy || this.state.includes('password')
+      secret: () => this.busy || this.state.includes('password') ||
+        (this.state.startsWith('community-') && Boolean(this.communityState?.secret))
     });
     this.editor.on('line', line => {
       if (this.queue.length >= 16) return this.disconnect('Too many queued commands.');
@@ -125,7 +126,7 @@ export class Session extends EventEmitter {
     const data = this.communityState;
     if (!this.state.startsWith('community-') || !data || (data.step && data.step !== 'mail-read')) return '';
     if (data.step === 'mail-read') return 'NPQ';
-    return new Map([['email', 'WNPQ'], ['config', 'RLNQ'], ['signature', 'EQ'],
+    return new Map([['email', 'WNPQ'], ['config', 'RLNPQ'], ['signature', 'EQ'],
       ['automessage', 'WQ'], ['bbs', 'ANPQ'], ['oneliners', 'ANPQ'], ['stats', 'Q']]).get(data.feature) ?? '';
   }
 
@@ -271,6 +272,7 @@ export class Session extends EventEmitter {
     this.replyTo = null;
     this.replySubject = undefined;
     this.chat = undefined;
+    this.communityState = undefined;
     this.screenHistory = '';
     this.transfers?.cancel?.(this);
     clearTimeout(this.lifetime);
@@ -450,6 +452,10 @@ export class Session extends EventEmitter {
     if (this.user) {
       const current = this.store.user(this.user.id);
       if (!current || current.disabled || current.application_status !== 'approved') return this.disconnect(ui(this.store, 'session_account_unavailable'));
+      // Backstop for the immediate disconnect: a session authenticated with a replaced password ends.
+      if (this.credentialVersion !== undefined && this.store.credentialVersion(current.id) !== this.credentialVersion) {
+        return this.disconnect(ui(this.store, 'session_password_changed_elsewhere'));
+      }
       this.user = current;
     }
     const command = line.trim().toUpperCase();
@@ -509,6 +515,7 @@ export class Session extends EventEmitter {
         return;
       }
       this.callId = this.store.startCall(user.id, this.id);
+      this.credentialVersion = user.credentialVersion;
       this.user = user;
       this.pendingHandle = undefined;
       this.checkDailyTime();
