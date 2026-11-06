@@ -4,6 +4,7 @@ import { TelnetInput } from './telnet.js';
 import * as screens from './screens.js';
 import { loginChoices, mainChoices, mainInitialSelection, mainChoiceGrid } from './presentation.js';
 import { doorScreen, doorCommand } from './doors.js';
+import { quotePrefix, quoteLines, parseQuote } from './quote.js';
 import { EventEmitter } from 'node:events';
 import { performance } from 'node:perf_hooks';
 
@@ -645,7 +646,8 @@ export class Session extends EventEmitter {
       this.subject = text(line.trim() ? line : this.replySubject ?? line, 60, 'Subject');
       this.body = [];
       this.state = 'body';
-      this.write(((this.string('editor_help')) + '\r\n' + (this.string('body_prompt'))));
+      this.write(this.string('editor_help') + '\r\n' +
+        (this.replyTo ? this.string('reply_editor_help') + '\r\n' : '') + this.string('body_prompt'));
     } else if (this.state === 'body') {
       if (command === '/ABORT') return this.cancelPost();
       if (!this.user.can_post) throw new InputError('permission_denied');
@@ -657,6 +659,8 @@ export class Session extends EventEmitter {
         this.lastPost = Date.now();
         this.cancelPost();
         this.write(('\r\n' + (this.string(this.store.isMessagePending(id) ? 'moderation_queued' : 'posted', { MESSAGEID: id })) + '\r\n'));
+      } else if (this.replyTo && /^\/q(?:\s|$)/i.test(line.trim())) {
+        this.quote(line.trim().slice(2).trim());
       } else {
         if (this.body.length >= 50 || this.body.join('\n').length + line.length + 1 > 4096) {
           throw new InputError('Message limit reached. Enter . to save or /abort to cancel.');
@@ -665,6 +669,29 @@ export class Session extends EventEmitter {
         this.write(this.string('body_prompt'));
       }
     }
+  }
+
+  // Reply editor /Q: list the parent's lines, or insert a range as "XX> " quotes.
+  // The parent is re-read through live grants each time; removed parents fail.
+  quote(argument) {
+    const parent = this.store.access.message(this.user.id, this.replyTo, this.baseId);
+    if (!parent) throw new InputError('Message not found in this base.');
+    const prefix = quotePrefix(parent.handle);
+    const lines = quoteLines(parent.body, prefix);
+    const range = parseQuote(argument, lines.length);
+    if (!range) {
+      this.write('\r\n' + this.string('message_quote_title', { COUNT: lines.length }) + '\r\n' +
+        lines.map((text, index) => this.string('message_quote_line', {
+          NUMBER: String(index + 1).padStart(3), LINE: text
+        }) + '\r\n').join('') + this.string('body_prompt'));
+      return;
+    }
+    const quoted = lines.slice(range.first - 1, range.last).map(text => `${prefix}${text}`.trimEnd());
+    if (this.body.length + quoted.length > 50 || [...this.body, ...quoted].join('\n').length > 4096) {
+      throw new InputError('error_message_quote_too_long');
+    }
+    this.body.push(...quoted);
+    this.write(this.string('message_quote_added', { COUNT: quoted.length }) + '\r\n' + this.string('body_prompt'));
   }
 
   // Open the oldest unread message, starting in the current base and wrapping

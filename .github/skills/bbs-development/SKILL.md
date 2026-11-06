@@ -179,6 +179,10 @@ Follow the byte-to-screen path:
   Show reply context in the template page indicator or generated header; reduce
   generated body page sizes accordingly, including local 24/25-row readers.
   Clear reply state on cancellation/cleanup and render saved notices after redraw.
+  Reply-only /Q (src/quote.js) lists the parent wrapped to QUOTE_WIDTH and
+  inserts 1-based inclusive ranges with handle-initial "XX> " prefixes. Re-read
+  the parent through Access.message on every /Q, never a cached body; refuse
+  whole quotes past 50 lines / 4096 characters. /Q stays literal text in new posts.
 - Existing databases use additive upgrades for users.disabled,
   messages.removed, message bases, private user info, can_post/can_doors,
   display strings, realms and the singleton settings table. Preserve existing data.

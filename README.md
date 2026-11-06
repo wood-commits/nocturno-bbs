@@ -135,9 +135,15 @@ no installed packages. Development dependencies are just lint/SAST tooling.
   or cancel with `/abort`. Message reading also paginates.
   While reading a public message, `R` replies in the same base. Enter keeps the
   displayed `Re:` subject (limited to 60 characters); typing replaces it.
-  Replies keep a durable parent message ID, shown when reading, without copying
-  the original body. The normal posting permissions, cooldown, signature and
-  editor limits apply. A removed parent cannot receive new replies, including
+  Replies keep a durable parent message ID, shown when reading, and copy none of
+  the original unless you quote it. In the reply editor, `/Q` lists the original's
+  lines, numbered and wrapped to fit, and `/Q n` or `/Q n-m` inserts those
+  lines prefixed with the author's initials (for example `NO> ` for Night_Owl).
+  Quote as often as you like between your own lines; quotes count toward the
+  50-line / 4096-character limit, and a quote that would exceed it is refused
+  whole. The original is re-read with your current read access each time.
+  Outside replies, `/Q` is ordinary text. The normal posting permissions,
+  cooldown, signature and editor limits apply. A removed parent cannot receive new replies, including
   replies already being composed; existing replies remain readable.
   Public messages and private mail start at the header's `|{BODY}` text position,
   with page sizes fitted above the page indicator and prompt on rows 23-24.
