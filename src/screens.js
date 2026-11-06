@@ -15,6 +15,7 @@ const HANDLE_WIDTH = 24;
 const DATE_WIDTH = 16;
 const SHORT_FIELD_WIDTH = 4;
 const ID_WIDTH = 6;
+const BASE_ID_WIDTH = 2;
 const ELLIPSIS_WIDTH = 3;
 const MAIN_MENU_CELL_WIDTH = 25;
 const MAIN_LABEL_WIDTH = MAIN_MENU_CELL_WIDTH - 2;
@@ -208,8 +209,13 @@ export function readMessage(row, page = 0, name, view, privateMail = false) {
 
 export function baseList(rows, page, name, view) {
   return custom('message-bases', heading(ui(view?.store, 'screens_message_bases_page_value', { VALUE1: page + 1 }), name), view) +
-    rows.map(row => (ui(view?.store, 'screens_value_value_3', { VALUE1: cell(row.id, SHORT_FIELD_WIDTH), VALUE2: cell(row.name, BOARD_NAME_WIDTH) }) + '\r\n' + ui(view?.store, 'screens_value_7', { VALUE3: cell(row.description, TEXT_WIDTH).trimEnd() }) + '\r\n')).join('') +
-    ('\r\n' + ui(view?.store, 'screens_id_open_base_n_p_page_q_main_menu'));
+    (ansi.cyan + ui(view?.store, 'screens_base_id_name_description') + '\r\n' + rule + ansi.reset) +
+    rows.map(row => {
+      const description = cell(row.description, TEXT_WIDTH).trimEnd();
+      return ui(view?.store, 'screens_value_value_3', { VALUE1: safeText(row.id).padStart(BASE_ID_WIDTH), VALUE2: cell(row.name, BOARD_NAME_WIDTH).trimEnd() }) + '\r\n' +
+        (description ? ui(view?.store, 'screens_value_7', { VALUE3: description }) + '\r\n' : '');
+    }).join('') + '\r\n' +
+    ui(view?.store, 'screens_id_open_base_n_p_page_q_main_menu');
 }
 
 export function doorMenu(name, view) {
