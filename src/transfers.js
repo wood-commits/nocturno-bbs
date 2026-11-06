@@ -119,7 +119,7 @@ export class Transfers {
     const path = this.storagePath(row.storage_key);
     // eslint-disable-next-line security/detect-non-literal-fs-filename
     try { unlinkSync(path); } catch (error) { if (error.code !== 'ENOENT') throw error; }
-    this.store.db.prepare('UPDATE transfer_files SET removed = 1, approved = 0, name = \'\', description = \'\' WHERE id = ?').run(id);
+    this.store.db.prepare('UPDATE transfer_files SET removed = 1, approved = 0, scan_seq = NULL, name = \'\', description = \'\' WHERE id = ?').run(id);
   }
 
   // One caller's unreviewed uploads must not consume the shared live payload/ID budget.
@@ -243,10 +243,23 @@ export class Transfers {
     const frame = heading(ui(this.store, session.state === 'transfer-qwk' ? 'transfers_qwk_title' : 'transfers_files_title'),
       this.store.settings().name);
     const status = notice ? `${notice}\r\n` : '';
+    if (session.state === 'transfer-new') {
+      const rows = this.store.access.newFiles(session.user.id);
+      // Only sequence numbers are kept, so N/Q never mark files approved after this render.
+      session.fileScanShown = rows.map(({ base_id, scan_seq }) => ({ base_id, scan_seq }));
+      session.write(frame + status + ui(this.store, 'transfers_new_files_title') + '\r\n' +
+        rows.map(row => ui(this.store, 'transfers_new_file_row', { ID: row.id, BASE: safeText(row.base_name),
+          NAME: safeText(row.name), SIZE: row.size, DESCRIPTION: safeText(row.description) }) + '\r\n').join('') +
+        (rows.length ? '' : ui(this.store, 'transfers_new_files_none') + '\r\n') +
+        ui(this.store, 'transfers_new_files_help') + '\r\n' + ui(this.store, 'selection'));
+      return;
+    }
     if (session.state === 'transfer-bases') {
       const rows = this.store.access.fileBases(session.transferPage ?? 0, session.user.id);
+      const unread = this.store.access.fileUnreadCounts(session.user.id);
       session.write(frame + status + ui(this.store, 'access_file_bases_title') + '\r\n' +
-        rows.map(row => ui(this.store, 'access_base_row', { ID: row.id, NAME: row.name, DESCRIPTION: row.description }) + '\r\n').join('') +
+        rows.map(row => ui(this.store, 'access_base_row', { ID: row.id, NAME: row.name, DESCRIPTION: row.description }) +
+          (unread.get(row.id) ? ui(this.store, 'message_base_new_count', { COUNT: unread.get(row.id) }) : '') + '\r\n').join('') +
         ui(this.store, 'access_file_bases_prompt') + '\r\n' + ui(this.store, 'selection'));
       return;
     }
@@ -268,8 +281,14 @@ export class Transfers {
     this.caller(session.user?.id);
     if (session.state === 'transfer-binary') throw new InputError('Binary transfer in progress.');
     const command = line.trim().toUpperCase();
+    if (session.state === 'transfer-new') return this.scan(session, command);
     if (command === 'Q') { session.menu(); return true; }
     const qwk = session.state === 'transfer-qwk';
+    if (command === 'S' && ['transfer-files', 'transfer-bases'].includes(session.state)) {
+      session.state = 'transfer-new';
+      this.show(session);
+      return true;
+    }
     if (session.state === 'transfer-bases' && /^[1-9]\d{0,9}$/.test(command)) {
       this.store.access.requireFile(session.user.id, Number(command));
       session.fileBaseId = Number(command);
@@ -291,6 +310,32 @@ export class Transfers {
     } else if (!qwk && ['N', 'P'].includes(command)) {
       session.transferPage = Math.max(0, Math.min(99, (session.transferPage ?? 0) + (command === 'N' ? 1 : -1)));
       this.show(session);
+    } else this.show(session);
+    return true;
+  }
+
+  // New-file scan: N and Q mark only the batch that was rendered; D ID downloads from it.
+  scan(session, command) {
+    const mark = () => {
+      this.store.access.markFilesSeen(session.user.id, session.fileScanShown ?? []);
+      session.fileScanShown = undefined;
+    };
+    if (command === 'Q') {
+      mark();
+      this.menu(session, 'files');
+    } else if (command === 'N') {
+      mark();
+      this.show(session);
+    } else if (command === 'C') {
+      this.store.access.fileCatchUp(session.user.id);
+      this.show(session, ui(this.store, 'transfers_new_files_caught_up'));
+    } else if (command === 'B') {
+      mark();
+      session.state = 'transfer-bases';
+      session.transferPage = 0;
+      this.show(session);
+    } else if (/^D [1-9]\d{0,9}$/.test(command)) {
+      this.begin(session, { direction: 'send', kind: 'download', file: this.download(session.user.id, command.slice(2)) });
     } else this.show(session);
     return true;
   }

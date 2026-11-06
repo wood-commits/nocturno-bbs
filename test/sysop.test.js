@@ -405,8 +405,9 @@ test('terminal resize redraws sysop prompts and retains partially typed input', 
   assert.deepEqual(f.errors, []);
 });
 
-test('settings validate, cancel and persist; registration needs confirmation', t => {
-  const { store, console, errors } = setup(t);
+test('settings validate, cancel and persist; registration and last callers need confirmation', t => {
+  const { store, console, errors, output } = setup(t);
+  const visible = () => plainText(output());
   console.handle('S');
   console.handle('A');
   console.handle('New Wire');
@@ -433,6 +434,18 @@ test('settings validate, cancel and persist; registration needs confirmation', t
   console.handle('E');
   console.handle('YES');
   assert.equal(store.settings().registration, 1);
+  assert.equal(store.settings().last_callers, 1);
+  assert.ok(visible().includes('Last callers after welcome: ON'));
+  console.handle('L');
+  console.handle('no');
+  assert.equal(store.settings().last_callers, 1);
+  console.handle('L');
+  console.handle('YES');
+  assert.equal(store.settings().last_callers, 0);
+  assert.ok(visible().lastIndexOf('welcome: OFF') > visible().lastIndexOf('welcome: ON'));
+  console.handle('L');
+  console.handle('YES');
+  assert.equal(store.settings().last_callers, 1);
   assert.deepEqual(errors, []);
 });
 
@@ -1288,9 +1301,9 @@ test('sysop menu columns clip long colored labels without shifting following key
   screen = terminal(fixture.output());
   for (const [column, key] of ['B', 'U', 'T'].entries()) {
     const start = 2 + column * 26;
-    assert.equal(screen.cells[11][start + 1].char, key);
-    assert.equal(screen.cells[11][start + 1].fg, '#ffff55');
-    assert.equal(screen.cells[11][start + 4].fg, '#aaaaaa');
+    assert.equal(screen.cells[12][start + 1].char, key);
+    assert.equal(screen.cells[12][start + 1].fg, '#ffff55');
+    assert.equal(screen.cells[12][start + 4].fg, '#aaaaaa');
   }
   assert.deepEqual(fixture.errors, []);
 });

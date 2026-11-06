@@ -33,6 +33,12 @@ function migrateAccess(db) {
   if (!db.prepare('PRAGMA table_info(transfer_files)').all().some(column => column.name === 'base_id')) {
     db.exec('ALTER TABLE transfer_files ADD COLUMN base_id INTEGER NOT NULL DEFAULT 1');
   }
+  if (!db.prepare('PRAGMA table_info(transfer_files)').all().some(column => column.name === 'scan_seq')) {
+    // New-file scan order: assigned when a file becomes downloadable, so late approvals are still new.
+    db.exec(`ALTER TABLE transfer_files ADD COLUMN scan_seq INTEGER;
+      UPDATE transfer_files SET scan_seq = id WHERE approved = 1 AND removed = 0;`);
+  }
+  db.exec('CREATE INDEX IF NOT EXISTS transfer_files_scan ON transfer_files(base_id, scan_seq)');
   const initialized = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'message_permissions'").get();
   db.exec(`
     CREATE TABLE IF NOT EXISTS message_permissions (
@@ -60,6 +66,12 @@ function migrateAccess(db) {
       PRIMARY KEY (role_id, base_id)
     );
     CREATE INDEX IF NOT EXISTS transfer_files_base ON transfer_files(base_id, removed, approved, id);
+    CREATE TABLE IF NOT EXISTS file_reads (
+      user_id INTEGER NOT NULL REFERENCES users(id),
+      base_id INTEGER NOT NULL REFERENCES file_bases(id),
+      last_seq INTEGER NOT NULL CHECK (last_seq >= 0),
+      PRIMARY KEY (user_id, base_id)
+    );
     CREATE TRIGGER IF NOT EXISTS transfer_files_base_insert BEFORE INSERT ON transfer_files
       WHEN NOT EXISTS (SELECT 1 FROM file_bases WHERE id = NEW.base_id)
       BEGIN SELECT RAISE(ABORT, 'File base not found'); END;
@@ -249,6 +261,52 @@ export class Access {
     this.requireMessage(userId, baseId);
     const row = this.store.message(messageId);
     return row?.base_id === baseId && !this.store.isMessagePending(messageId) ? row : undefined;
+  }
+
+  // Caller-owned new-file pointers: one high-water mark of scan_seq per file base.
+  fileUnreadCounts(userId) {
+    const user = this.caller(userId);
+    return new Map(this.db.prepare(`SELECT f.base_id, count(*) AS n FROM transfer_files f
+      JOIN file_permissions p ON p.base_id = f.base_id AND p.role_id = ? AND p.can_list = 1
+      LEFT JOIN file_reads r ON r.user_id = ? AND r.base_id = f.base_id
+      WHERE f.approved = 1 AND f.removed = 0 AND f.scan_seq > coalesce(r.last_seq, 0)
+      GROUP BY f.base_id`).all(user.role_id, userId).map(row => [row.base_id, row.n]));
+  }
+
+  // The oldest new files across listable bases, in approval order. Rendering does not
+  // mark them; callers pass the shown scan_seq values to markFilesSeen.
+  newFiles(userId, limit = 10) {
+    const user = this.caller(userId);
+    return this.db.prepare(`SELECT f.id, f.name, f.description, f.size, f.created_at, f.base_id,
+      f.scan_seq, b.name AS base_name FROM transfer_files f
+      JOIN file_bases b ON b.id = f.base_id
+      JOIN file_permissions p ON p.base_id = f.base_id AND p.role_id = ? AND p.can_list = 1
+      LEFT JOIN file_reads r ON r.user_id = ? AND r.base_id = f.base_id
+      WHERE f.approved = 1 AND f.removed = 0 AND f.scan_seq > coalesce(r.last_seq, 0)
+      ORDER BY f.scan_seq LIMIT ?`).all(user.role_id, userId, limit);
+  }
+
+  // Advances only to sequences the caller was shown, never past files approved since.
+  markFilesSeen(userId, rows) {
+    this.caller(userId);
+    for (const row of rows) this.advanceFileRead(userId, row.base_id, row.scan_seq);
+  }
+
+  advanceFileRead(userId, baseId, sequence) {
+    if (!Number.isSafeInteger(sequence) || sequence < 1) return;
+    this.db.prepare(`INSERT INTO file_reads(user_id, base_id, last_seq) VALUES (?, ?, ?)
+      ON CONFLICT(user_id, base_id) DO UPDATE SET last_seq = max(last_seq, excluded.last_seq)`)
+      .run(userId, baseId, sequence);
+  }
+
+  // Marks every currently listable file as seen; denied bases keep their pointers.
+  fileCatchUp(userId) {
+    const user = this.caller(userId);
+    for (const row of this.db.prepare(`SELECT f.base_id, max(f.scan_seq) AS sequence FROM transfer_files f
+      JOIN file_permissions p ON p.base_id = f.base_id AND p.role_id = ? AND p.can_list = 1
+      WHERE f.approved = 1 AND f.removed = 0 GROUP BY f.base_id`).all(user.role_id)) {
+      this.advanceFileRead(userId, row.base_id, row.sequence);
+    }
   }
 
   fileBase(id) {

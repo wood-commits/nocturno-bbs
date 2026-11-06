@@ -57,6 +57,9 @@ export class Store {
         idle_minutes INTEGER NOT NULL CHECK (idle_minutes BETWEEN 1 AND 60)
       );
     `);
+    if (!this.db.prepare('PRAGMA table_info(settings)').all().some(column => column.name === 'last_callers')) {
+      this.db.exec('ALTER TABLE settings ADD COLUMN last_callers INTEGER NOT NULL DEFAULT 1 CHECK (last_callers IN (0, 1))');
+    }
     if (!this.db.prepare('PRAGMA table_info(users)').all().some(column => column.name === 'disabled')) {
       this.db.exec('ALTER TABLE users ADD COLUMN disabled INTEGER NOT NULL DEFAULT 0 CHECK (disabled IN (0, 1))');
     }
@@ -171,25 +174,28 @@ export class Store {
 
   initSettings(name) {
     text(name, 40, 'BBS name');
-    this.db.prepare('INSERT OR IGNORE INTO settings VALUES (1, ?, 1, 60, 5)').run(name);
+    this.db.prepare(`INSERT OR IGNORE INTO settings (id, name, registration, session_minutes, idle_minutes, last_callers)
+      VALUES (1, ?, 1, 60, 5, 1)`).run(name);
   }
 
   settings() {
-    return this.db.prepare('SELECT name, registration, session_minutes, idle_minutes FROM settings WHERE id = 1').get() ??
-      { name: 'Nocturno BBS', registration: 1, session_minutes: 60, idle_minutes: 5 };
+    return this.db.prepare('SELECT name, registration, session_minutes, idle_minutes, last_callers FROM settings WHERE id = 1').get() ??
+      { name: 'Nocturno BBS', registration: 1, session_minutes: 60, idle_minutes: 5, last_callers: 1 };
   }
 
-  updateSettings({ name, registration, session_minutes, idle_minutes }) {
+  updateSettings({ name, registration, session_minutes, idle_minutes, last_callers = this.settings().last_callers }) {
     name = text(name, 40, 'BBS name');
     if (![0, 1].includes(registration) || !Number.isInteger(session_minutes) ||
         session_minutes < 1 || session_minutes > 1440 || !Number.isInteger(idle_minutes) ||
-        idle_minutes < 1 || idle_minutes > 60) {
-      throw new InputError('Registration must be 0/1; session 1-1440 and idle 1-60 minutes.');
+        idle_minutes < 1 || idle_minutes > 60 || ![0, 1].includes(last_callers)) {
+      throw new InputError('Registration and last callers must be 0/1; session 1-1440 and idle 1-60 minutes.');
     }
-    this.db.prepare(`INSERT INTO settings VALUES (1, ?, ?, ?, ?)
+    this.db.prepare(`INSERT INTO settings (id, name, registration, session_minutes, idle_minutes, last_callers)
+      VALUES (1, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET name = excluded.name, registration = excluded.registration,
-      session_minutes = excluded.session_minutes, idle_minutes = excluded.idle_minutes`)
-      .run(name, registration, session_minutes, idle_minutes);
+      session_minutes = excluded.session_minutes, idle_minutes = excluded.idle_minutes,
+      last_callers = excluded.last_callers`)
+      .run(name, registration, session_minutes, idle_minutes, last_callers);
   }
 
   user(id) {
@@ -294,6 +300,7 @@ export class Store {
       this.db.prepare('DELETE FROM community_profiles WHERE user_id = ?').run(user.id);
       this.db.prepare('DELETE FROM caller_limit_users WHERE user_id = ?').run(user.id);
       this.db.prepare('DELETE FROM message_reads WHERE user_id = ?').run(user.id);
+      this.db.prepare('DELETE FROM file_reads WHERE user_id = ?').run(user.id);
       this.db.exec('COMMIT');
     } catch (error) {
       this.db.exec('ROLLBACK');

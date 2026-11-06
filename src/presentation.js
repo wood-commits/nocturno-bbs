@@ -25,6 +25,8 @@ export function mainColumnWidths(labels = mainChoices.map(([, label]) => label))
   return mainChoiceGrid[0].map((_, column) =>
     Math.max(...mainChoiceGrid.map(row => row[column] === null ? 0 : plainText(labels[row[column]]).length)));
 }
+// Post-login artwork plays welcome.ans, then welcome2.ans through welcome9.ans when present.
+export const welcomeScreens = ['welcome', ...Array.from({ length: 8 }, (_, index) => `welcome${index + 2}`)];
 const fixedScreens = new Set(['loginmatrix', 'main', 'login', 'stats', 'message-header']);
 export const screenTokens = new Map([
   ['loginmatrix', [...common, 'CHOICE1', 'CHOICE2', 'CHOICE3', 'CHOICE4', 'CHOICE5']],
@@ -34,6 +36,7 @@ export const screenTokens = new Map([
   ['message-header', [...common, 'PAGE', 'BASENAME', 'BASEID', 'MESSAGEID', 'MESSAGEAUTHOR', 'MESSAGESUBJECT', 'MESSAGEDATE',
     'RECIPIENT', 'MESSAGEDAY', 'MESSAGETIME', 'BODY']],
   ['welcome', [...common, 'TRANSPORT', 'TAGLINE']],
+  ...welcomeScreens.slice(1).map(screen => [screen, [...common, 'TRANSPORT', 'TAGLINE']]),
   ['users', [...common, 'PAGE']],
   ['callers', [...common, 'PAGE']],
   ['messages', [...common, 'PAGE', 'BASENAME', 'BASEID']],
@@ -313,6 +316,10 @@ export class Presentation {
         }
       }
     }
+  }
+
+  welcomeSequence() {
+    return welcomeScreens.filter(screen => this.templates.has(screen));
   }
 
   position(screen, marker) {

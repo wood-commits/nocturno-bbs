@@ -114,6 +114,9 @@ test('real telnet file and QWK transfers preserve binary bytes, permissions, men
   client.clear(); client.send('unique transfer password!');
   await client.wait('Press any key');
   client.clear(); client.socket.write(' ');
+  await client.wait('LAST CALLERS');
+  await client.wait('Press any key');
+  client.clear(); client.socket.write(' ');
   await client.wait('Main command:');
   client.clear(); client.send('F');
   await client.wait('FILE CATALOG');

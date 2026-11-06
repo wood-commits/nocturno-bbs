@@ -72,6 +72,7 @@ export class SysopConsole {
         lines = [
           ui(this.store, 'sysop_a_bbs_name_value', { NAME: settings.name }),
           ui(this.store, 'sysop_e_new_caller_registration_value', { VALUE1: uiText(this.store, settings.registration ? 'OPEN' : 'CLOSED') }),
+          ui(this.store, 'sysop_l_last_callers_value', { VALUE1: uiText(this.store, settings.last_callers ? 'ON' : 'OFF') }),
           ui(this.store, 'sysop_1_session_time_value_minutes', { SESSION_MINUTES: settings.session_minutes }),
           ui(this.store, 'sysop_2_idle_timeout_value_minutes', { IDLE_MINUTES: settings.idle_minutes }),
           '', ui(this.store, 'sysop_name_registration_apply_live_time_limits_apply_to_new_connecti'),
@@ -436,6 +437,9 @@ export class SysopConsole {
       } else if (command === 'E') {
         this.confirm(ui(this.store, 'sysop_value_new_caller_registration', { VALUE1: settings.registration ? 'Close' : 'Open' }), () =>
           this.store.updateSettings({ ...this.store.settings(), registration: settings.registration ? 0 : 1 }));
+      } else if (command === 'L') {
+        this.confirm(ui(this.store, 'sysop_value_last_callers_after_welcome', { VALUE1: settings.last_callers ? 'Hide' : 'Show' }), () =>
+          this.store.updateSettings({ ...this.store.settings(), last_callers: settings.last_callers ? 0 : 1 }));
       } else if (['A', '1', '2'].includes(command)) {
         const key = command === 'A' ? 'name' : command === '1' ? 'session_minutes' : 'idle_minutes';
         this.field = {

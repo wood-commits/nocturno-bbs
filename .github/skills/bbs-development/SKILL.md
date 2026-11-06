@@ -207,8 +207,17 @@ Follow the byte-to-screen path:
   last_seq per base, only advanced with max(). Readers mark on every render;
   S scans current base first then wraps by base ID; C catches up. Counts and
   scans go through Access with live read grants and skip pending/removed rows.
-  Deleting a user clears its pointers. The logon summary shares the welcome
-  prompt row so it never scrolls artwork. Local console and QWK leave pointers alone.
+  Deleting a user clears its pointers. The logon summary shares the final
+  pre-main prompt row so it never scrolls artwork. Local console and QWK leave pointers alone.
+- New-file scan: transfer_files.scan_seq (additive; backfilled once from IDs for
+  approved rows) is assigned max+1 on approval in Limits.approveUpload (kept on
+  re-approval), cleared on unapproval/removal. file_reads keeps one caller-owned
+  last_seq per file base, advanced with max(). Access.newFiles lists the oldest 10
+  across can_list bases without marking; Transfers stores only the shown
+  base/sequence pairs, and N/Q/B mark exactly those (never later approvals).
+  C catches up listable bases only. Files S/bases S open state transfer-new
+  (shortcuts NCBQ; D ID downloads, redraws repeat the unmarked batch). Deleting
+  a user clears file_reads. The logon prompt appends the new-file total.
 - Message-list M toggles per-base approval with YES; T opens pending posts.
   Pending queues accept numeric reads, A ID approval and R ID rejection with
   YES. Callers, statistics and QWK export must exclude pending rows; validate
@@ -250,7 +259,12 @@ Follow the byte-to-screen path:
   and main A replays stream at 2,880 bytes/second (28.8k, 8N1), preserving CSI/
   CRLF chunks. Ignore playback keys, show the pause prompt only after completion,
   and cancel playback timers on disconnect. Other output stays unpaced.
-  Post-login artwork pauses for any key before main. Main `?` shows shortcuts;
+  Post-login artwork pauses for any key before main. welcome.ans then present
+  welcome2-9.ans (Presentation.welcomeSequence, gaps skipped) each stream and pause;
+  later screens run from session.welcomeSteps through the queue/drain so errors
+  stay reported. settings.last_callers (additive, default 1, S/L with YES) adds an
+  unpaced last-callers screen at logon only; A replays art without it. The
+  new-message summary rides the final pre-main prompt. Main `?` shows shortcuts;
   `/G` still logs off.
 - Main initially selects Messages (M), the first left-column item. Keep its
   remembered selection separate from login selection, update it for arrows and

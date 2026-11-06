@@ -49,6 +49,10 @@ async function connect(port, errors) {
       await this.command('socket community password!', 'Press any key');
       received = '';
       socket.write(' ');
+      await this.wait('LAST CALLERS');
+      await this.wait('Press any key');
+      received = '';
+      socket.write(' ');
       await this.wait('Main command:');
     }
   };

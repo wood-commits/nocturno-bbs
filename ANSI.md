@@ -130,10 +130,11 @@ Every screen supports these common MCI codes:
 | `loginmatrix.ans` | Pre-login lightbar menu | `\|{CHOICE1}` login, `\|{CHOICE2}` apply, `\|{CHOICE3}` check application, `\|{CHOICE4}` message sysop, `\|{CHOICE5}` hangup |
 | `login.ans` | Handle/password artwork | `\|{LOGINHANDLE}` handle input position, `\|{LOGINPASSWORD}` hidden password input position, `\|{LOGINSTATUS}` login status, `\|{LOGINHELP}` login help |
 | `welcome.ans` | Post-login artwork with an application-generated any-key pause; also A (art) | `\|{TRANSPORT}`, `\|{TAGLINE}` |
+| `welcome2.ans` ... `welcome9.ans` | Optional further post-login screens, played after `welcome.ans` in numeric order (missing numbers are skipped), each with its own pause; also A (art). At logon only, the optional last-callers list follows the final screen | Same as `welcome.ans` |
 | `main.ans` | Lightbar main-menu artwork | None; literal menu labels use white-on-blue selection and gray-on-black inactive colors |
 | `stats.ans` | Current caller's statistics | `\|CS`, `\|MP`, `\|MU`, `\|FU`, `\|DL`, `\|SD`, `\|UI` |
 | `users.ans` | User-list heading only | `\|{PAGE}` |
-| `callers.ans` | Last-callers heading only | `\|{PAGE}` |
+| `callers.ans` | Last-callers heading only (main `L` and the logon list) | `\|{PAGE}` |
 | `messages.ans` | Selected message-base list heading only | `\|{PAGE}`, `\|{BASEID}`, `\|MB` |
 | `message-header.ans` | Public-message/private-mail header | `\|{PAGE}`, `\|{BASEID}`, `\|MB`, `\|{MESSAGEID}`, `\|{MESSAGEAUTHOR}`, `\|{RECIPIENT}` (`All` for public posts), `\|{MESSAGESUBJECT}`, `\|{MESSAGEDATE}` (UTC timestamp), `\|{MESSAGEDAY}` (UTC date), `\|{MESSAGETIME}` (UTC time), `\|{BODY}` (body cursor) |
 | `message-bases.ans` | Message-base selection heading only | `\|{PAGE}` |

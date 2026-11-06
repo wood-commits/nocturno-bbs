@@ -100,7 +100,13 @@ prompt. With artwork, notices temporarily replace the warning on row 23, keeping
 the artwork and row-24 prompt in place without scrolling.
 After a successful login, welcome artwork streams at a simulated 28.8k modem
 speed (2,880 bytes/second, 8N1), then pauses until any key is pressed.
-The main menu's `A` artwork replay uses the same speed. Keys pressed during
+Optional `welcome2.ans` through `welcome9.ans` follow `welcome.ans` in numeric
+order, each streamed and paused the same way; missing numbers are skipped.
+Unless the sysop turns it off (`S` then `L`), a last-callers list (the ten most
+recent calls, including the current one marked `*`) follows the artwork and
+pauses once more before the main menu.
+The main menu's `A` artwork replay plays the same welcome sequence at the same
+speed, without the last-callers list. Keys pressed during
 playback are ignored; other screens and file transfers remain at normal speed.
 Handles are case-insensitive,
 3-24 letters/numbers/underscore/hyphen, starting with a letter or number.
@@ -149,7 +155,8 @@ no installed packages. Development dependencies are just lint/SAST tooling.
   with page sizes fitted above the page indicator and prompt on rows 23-24.
   Full subjects/base names appear below the header only if they do not fit its fields.
 - **New-message scan.** Each caller has a private read pointer per message
-  base. After logon the welcome prompt shows the total of new messages
+  base. After logon the prompt of the last screen before the main menu (the
+  last-callers list, or the final welcome artwork when it is off) shows the total of new messages
   (for example "You have 12 new messages."). The base list shows `(N new)`
   beside each base, and the message list marks new messages with `*` after the ID.
   `S` in the base list, message list or reader opens the oldest new message,
@@ -222,7 +229,7 @@ only the fixed footer prompt and fit reply context above the reserved notice row
 
 | WFC key | Working controls |
 |---|---|
-| `S` | System configuration: `A` BBS name, `E` registration toggle, `1` session minutes, `2` idle minutes; `B` message bases, `F` file bases, `R` roles, `U` user editor, `T` string editor |
+| `S` | System configuration: `A` BBS name, `E` registration toggle, `L` last callers after welcome (on by default), `1` session minutes, `2` idle minutes; `B` message bases, `F` file bases, `R` roles, `U` user editor, `T` string editor |
 | `U` | User editor: enter a user ID to open its numbered form, then select a field with `1`-`8` |
 | `B` | Message base: numeric ID to read, `D ID` to remove a message |
 | `C` | Caller history with UTC login time, duration and node |
@@ -352,7 +359,8 @@ closure `reason`. User results also include lossless telnet `base64` output.
 Output is incremental, not a screen snapshot. Read one prompt at a time:
 standalone menu keys are immediate; fields and commands with arguments need
 `\r` (Enter). For example open a user terminal, send `L`, send `handle\r`,
-send `password\r`, poll until welcome, then send a space to enter main.
+send `password\r`, poll until welcome, then send a space for each remaining
+welcome screen (including the last-callers list when enabled) to enter main.
 User registration still needs approval; login, message/file grants, doors,
 private mail, community features and all existing limits use the same services
 as telnet callers. Sysop sessions reuse the existing console controller,
@@ -551,7 +559,7 @@ before waiting for callers to disconnect. Cleanup also runs on process exit.
 If a terminal was left broken by an older version or a forced process kill,
 close that terminal and open a fresh one.
 
-BBS name and registration changes apply live. Configured session lifetime
+BBS name, registration and last-callers changes apply live. Configured session lifetime
 (1-1440 minutes) and idle timeout (1-60 minutes) apply to **new connections**;
 existing connections retain the limits with which they started. Renames retain
 user IDs, message authorship and caller history. Disabling an account immediately
@@ -605,7 +613,7 @@ Enter. `?` immediately displays this list in the BBS.
 | `D` | Door lounge |
 | `G` | Own autosignature |
 | `Q` | Goodbye (`/G` also works) |
-| `A` | Welcome artwork |
+| `A` | Welcome artwork (`welcome.ans`, then any `welcome2.ans`-`welcome9.ans`) |
 
 ### Email, preferences and community content
 
@@ -661,6 +669,18 @@ From `F`, use `D ID` to download an approved file, `U` to upload, `N/P` to
 page, `B` to choose an accessible file base by ID, and `Q` to return.
 If the selected base is inaccessible, the base selector opens instead.
 Your terminal needs built-in **ZMODEM** support.
+
+**New-file scan.** `S` in the file catalog or base selector lists files approved
+since your last scan, oldest approval first, ten at a time across every base you
+can list (the base selector shows `(N new)` beside each base, and the logon prompt
+adds `New files: N.`). A file counts as new when the sysop approves it, so a
+late-approved upload is still new even if its ID is older. In the scan, `D ID`
+downloads, `N` marks the shown files as seen and shows the next ten, `C` marks
+every listable file as seen, `B` opens the base selector and `Q` returns to the
+catalog (both also mark the shown files). Only files you were shown are marked,
+never ones approved meanwhile. Pointers are private and per base; a base you
+lose access to keeps its pointer, and deleting an account clears them.
+Unapproving or removing a file withdraws it; re-approving makes it new again.
 Downloads require the file base's list/download grants. Uploads go to the
 selected base, require list/upload and posting permissions, and remain unavailable to other callers
 until the local sysop approves them with **F, A ID, YES**.

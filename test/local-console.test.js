@@ -72,6 +72,8 @@ async function login(send, session) {
   send(secret + '\r\n');
   await waitFor(() => session.state === 'post-welcome' && !session.busy, 15000);
   send(' ');
+  await waitFor(() => !session.busy && !session.welcomeSteps?.length);
+  send(' ');
   await waitFor(() => session.state === 'main' && !session.busy);
 }
 

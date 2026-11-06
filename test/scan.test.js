@@ -151,8 +151,12 @@ test('telnet callers see new-message totals, scan across bases and catch up', { 
   const form = new Presentation(samples);
   await send('L', form.position('login', '|{LOGINHANDLE}') ?? 'Handle');
   await send('Reader', form.position('login', '|{LOGINPASSWORD}') ?? 'assword');
-  await send(secret, 'You have 3 new messages.');
-  await wait('Press any key');
+  await send(secret, 'Press any key');
+  // The summary shares the prompt row of the last screen before main (last callers by default).
+  assert.ok(!plainText(output).includes('new messages'));
+  output = ''; socket.write(' ');
+  await wait('LAST CALLERS');
+  await wait('You have 3 new messages.  Press any key');
   output = ''; socket.write(' ');
   await wait('Main command:');
   await send('M', 'Scan new');

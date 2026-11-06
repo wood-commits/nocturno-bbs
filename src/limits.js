@@ -180,7 +180,10 @@ export class Limits {
     try {
       const file = this.db.prepare('SELECT id, user_id, size, ratio_credited FROM transfer_files WHERE id = ? AND removed = 0').get(fileId);
       if (!file) throw new InputError('File not found.');
-      this.db.prepare('UPDATE transfer_files SET approved = ? WHERE id = ?').run(Number(approved), fileId);
+      // Approval assigns the next new-file scan position; unapproval withdraws it.
+      this.db.prepare(`UPDATE transfer_files SET approved = ?, scan_seq = CASE WHEN ? THEN
+        coalesce(CASE WHEN approved = 1 THEN scan_seq END, (SELECT coalesce(max(scan_seq), 0) + 1 FROM transfer_files))
+        ELSE NULL END WHERE id = ?`).run(Number(approved), Number(approved), fileId);
       if (approved && !file.ratio_credited) this.credit(file);
       this.db.exec('COMMIT');
     } catch (error) {

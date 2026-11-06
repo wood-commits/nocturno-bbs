@@ -43,7 +43,12 @@ export class Session extends EventEmitter {
     });
     this.editor.on('key', key => {
       if (this.busy || this.welcomePlayback) return;
-      if (['post-welcome', 'art'].includes(this.state)) return this.menu();
+      if (['post-welcome', 'art'].includes(this.state)) {
+        if (!this.welcomeSteps?.length) return this.menu();
+        // Remaining welcome screens run through the queue so failures reach drain's handler.
+        this.queue.push('');
+        return void this.drain();
+      }
       const choices = this.state === 'welcome' ? loginChoices : mainChoices;
       if (['up', 'down', 'left', 'right'].includes(key)) {
         this.shortcut = undefined;
@@ -121,8 +126,9 @@ export class Session extends EventEmitter {
     if (this.state === 'messages') return 'WSCBNPQ';
     if (this.state === 'doors') return '1Q';
     if (this.state === 'realm') return 'ETHBFMWLCNP?Q';
-    if (this.state === 'transfer-files') return 'UBNPQ';
-    if (this.state === 'transfer-bases') return 'NPQ';
+    if (this.state === 'transfer-files') return 'UBSNPQ';
+    if (this.state === 'transfer-bases') return 'SNPQ';
+    if (this.state === 'transfer-new') return 'NCBQ';
     if (this.state === 'transfer-qwk') return 'DUQ';
     const data = this.communityState;
     if (!this.state.startsWith('community-') || !data || (data.step && data.step !== 'mail-read')) return '';
@@ -230,7 +236,7 @@ export class Session extends EventEmitter {
         this.store.access.requireFile(current.id, this.fileBaseId ?? 1);
         return this.transfers.show(this);
       }
-      if (state === 'transfer-bases') return this.transfers.show(this);
+      if (['transfer-bases', 'transfer-new'].includes(state)) return this.transfers.show(this);
       if (['doors', 'realm'].includes(state)) this.store.access.caller(current.id, 'doors');
       this.write(screens.ansi.reset + screens.ansi.clear + screen);
     } catch (error) {
@@ -384,9 +390,22 @@ export class Session extends EventEmitter {
     this.drawMenu(notice);
   }
 
-  async welcomeArt(title, prompt, summary = '') {
+  // Plays welcome.ans then welcome2-9.ans, each paced and paused; logons may add last callers.
+  async welcomeSequence(title, prompt, summary = '', lastCallers = false) {
+    const art = this.presentation?.welcomeSequence?.() ?? [];
+    const steps = (art.length ? art : ['welcome']).map(screen => last =>
+      this.welcomeArt(title, last ? prompt : 'continue_prompt', last ? summary : '', screen));
+    if (lastCallers) {
+      steps.push(() => this.write(screens.logonCallers(this.store.callers(0), this.name, this.view(),
+        summary + ui(this.store, prompt))));
+    }
+    this.welcomeSteps = steps.map((step, index) => () => step(index === steps.length - 1));
+    await this.welcomeSteps.shift()();
+  }
+
+  async welcomeArt(title, prompt, summary = '', screen = 'welcome') {
     const fallback = screens.heading(ui(this.store, title), this.name);
-    const artwork = String(this.presentation?.render('welcome', fallback, this.view().values) ?? fallback);
+    const artwork = String(this.presentation?.render(screen, fallback, this.view().values) ?? fallback);
     // Keep CSI controls and CRLF intact for screen history and local node watchers.
     // eslint-disable-next-line no-control-regex
     const tokens = artwork.matchAll(/\x1b\[[0-?]*[ -/]*[@-~]|\r\n|[\s\S]/g);
@@ -425,6 +444,7 @@ export class Session extends EventEmitter {
   }
 
   menu() {
+    this.welcomeSteps = undefined;
     this.state = 'main';
     this.page = 0;
     this.selected = this.mainSelected;
@@ -468,6 +488,10 @@ export class Session extends EventEmitter {
     }
     if (await this.community?.handle(this, line)) return;
     if (await this.transfers?.handle(this, line)) return;
+    if (['post-welcome', 'art'].includes(this.state)) {
+      const step = this.welcomeSteps?.shift();
+      return step ? step() : this.menu();
+    }
     if (this.state === 'welcome') {
       if (command === 'Q') return this.disconnect(this.string('login_goodbye'));
       if (command === 'S') return this.community.menu(this, 'note');
@@ -521,9 +545,12 @@ export class Session extends EventEmitter {
       this.pendingHandle = undefined;
       this.checkDailyTime();
       this.state = 'post-welcome';
-      const unread = [...this.store.access.unreadCounts(user.id).values()].reduce((sum, count) => sum + count, 0);
-      await this.welcomeArt('session_welcome', 'continue_prompt',
-        unread ? this.string('message_new_summary', { COUNT: unread }) : '');
+      const total = counts => [...counts.values()].reduce((sum, count) => sum + count, 0);
+      const unread = total(this.store.access.unreadCounts(user.id));
+      const files = total(this.store.access.fileUnreadCounts(user.id));
+      await this.welcomeSequence('session_welcome', 'continue_prompt',
+        (unread ? this.string('message_new_summary', { COUNT: unread }) : '') +
+        (files ? this.string('file_new_summary', { COUNT: files }) : ''), Boolean(this.store.settings().last_callers));
     } else if (!this.user) {
       throw new Error('Authenticated state without a caller');
     } else if (this.state === 'main') {
@@ -547,7 +574,7 @@ export class Session extends EventEmitter {
       if (command === 'F' || command === 'K') return this.transfers.menu(this, command === 'F' ? 'files' : 'qwk');
       if (command === 'A') {
         this.state = 'art';
-        await this.welcomeArt('session_welcome_art', 'return_prompt');
+        await this.welcomeSequence('session_welcome_art', 'return_prompt');
       } else if (command === 'D') {
         this.state = 'doors';
         this.write(screens.doorMenu(this.name, this.view()));

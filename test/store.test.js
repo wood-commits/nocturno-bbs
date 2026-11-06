@@ -186,7 +186,7 @@ test('pre-sysop database migrates without losing users or messages, and settings
     store = new Store(filename);
     store.initSettings('Nocturno BBS');
     assert.deepEqual({ ...store.settings() },
-      { name: 'Persistent Name', registration: 0, session_minutes: 30, idle_minutes: 2 });
+      { name: 'Persistent Name', registration: 0, session_minutes: 30, idle_minutes: 2, last_callers: 1 });
     assert.equal(store.user(1).disabled, 1);
     assert.equal(store.message(1).handle, 'NewCaller');
     assert.equal(store.bases()[1].name, 'Tech');
@@ -194,7 +194,7 @@ test('pre-sysop database migrates without losing users or messages, and settings
     assert.equal(store.stringOverride('goodbye'), 'Good night!');
     assert.equal(store.user(1).location, 'The Wire');
     const saved = store.settings();
-    for (const invalid of [{ name: '\x1b[2J' }, { registration: 2 }, { idle_minutes: 61 },
+    for (const invalid of [{ name: '\x1b[2J' }, { registration: 2 }, { idle_minutes: 61 }, { last_callers: 2 },
       { session_minutes: 0 }, { session_minutes: 1.5 }, { idle_minutes: NaN }]) {
       assert.throws(() => store.updateSettings({ ...saved, ...invalid }), InputError);
       assert.deepEqual(store.settings(), saved);

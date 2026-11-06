@@ -65,6 +65,9 @@ test('telnet replies list and quote the original with limits and live checks', {
   await send('Reader', form.position('login', '|{LOGINPASSWORD}'));
   await send(secret, 'Press any key');
   output = ''; socket.write(' ');
+  await wait('LAST CALLERS');
+  await wait('Press any key');
+  output = ''; socket.write(' ');
   await wait('Main command:');
   await send('M', 'Scan new');
   await send(String(parent), 'Line one of the original');

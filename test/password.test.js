@@ -92,6 +92,9 @@ async function login(client, secret) {
   await client.send('Changer', form.position('login', '|{LOGINPASSWORD}') ?? 'assword');
   await client.send(secret, 'Press any key');
   client.clear(); client.socket.write(' ');
+  await client.wait('LAST CALLERS');
+  await client.wait('Press any key');
+  client.clear(); client.socket.write(' ');
   await client.wait('Main command:');
 }
 

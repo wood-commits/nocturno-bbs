@@ -64,6 +64,9 @@ async function register(caller, store, handle = 'Night_Owl') {
   caller.clear(); caller.send('unique test password!');
   await caller.wait('Press any key');
   caller.clear(); caller.socket.write(' ');
+  await caller.wait('LAST CALLERS');
+  await caller.wait('Press any key');
+  caller.clear(); caller.socket.write(' ');
   await caller.wait('Main command:');
   assert.ok(!caller.output().includes('unique test password!'));
 }
@@ -325,6 +328,9 @@ test('real socket single-key actions need no Enter while subjects, multi-digit I
   await caller.wait('Press any key');
   assert.ok(!caller.output().includes('QGood password'));
   caller.clear(); caller.socket.write(' ');
+  await caller.wait('LAST CALLERS');
+  await caller.wait('Press any key');
+  caller.clear(); caller.socket.write(' ');
   await caller.wait('Main command:');
   for (const [command, target] of [['U', 'USER LIST'], ['Q', 'Main command:'],
     ['C', 'CONFIG'], ['Q', 'Main command:'], ['F', 'FILE CATALOG'],
@@ -435,6 +441,9 @@ test('real telnet session: register, users, callers, post, read, logout and logi
   await returning.wait(passwordPrompts);
   returning.clear();
   returning.send('unique test password!');
+  await returning.wait('Press any key');
+  returning.clear(); returning.socket.write(' ');
+  await returning.wait('LAST CALLERS');
   await returning.wait('Press any key');
   returning.socket.write(' ');
   await returning.wait('Main command:');
@@ -952,6 +961,9 @@ test('legacy login lightbar checks pending applications without granting access'
   await caller.wait('Press any key');
   assert.ok(!caller.output().includes('SAUCE00'));
   assert.ok(!caller.output().includes('Main command:'));
+  caller.clear(); caller.socket.write('x');
+  await caller.wait('LAST CALLERS');
+  await caller.wait('Press any key');
   caller.clear(); caller.socket.write('x');
   await caller.wait('Main command:');
   caller.clear(); caller.socket.write('\x1bOA\r\n');

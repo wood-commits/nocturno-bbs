@@ -190,7 +190,8 @@ test('MCP callers authenticate normally, hide passwords, play doors and enforce 
   assert.ok(output.text.includes('Press any key'));
   assert.ok(!output.text.includes(password));
   assert.ok(!Buffer.from(output.base64, 'base64').toString('latin1').includes(password));
-  await c.send(id, ' ');
+  assert.match((await c.send(id, ' ')).text, /LAST CALLERS[\s\S]*McpCaller/);
+  assert.equal((await c.send(id, ' ')).state, 'main');
   assert.equal((await c.send(id, 'D')).state, 'doors');
   assert.equal((await c.send(id, '1')).state, 'realm');
   await c.send(id, 'E');

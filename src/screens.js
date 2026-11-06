@@ -131,13 +131,23 @@ export function userList(rows, page, name, view) {
 
 export function callerList(rows, page, name, view) {
   return custom('callers', heading(ui(view?.store, 'screens_last_callers_page_value', { VALUE1: page + 1 }), name), view) +
-    (ansi.cyan + ui(view?.store, 'screens_call_handle_logon_utc_min_node') + '\r\n' + (rule) + ansi.reset) +
+    callerRows(rows, view) +
+    ('\r\n' + ui(view?.store, 'screens_connected_or_disconnect_pending_history_retains_1000_calls') + '\r\n' + ui(view?.store, 'screens_n_next_p_previous_q_main_menu'));
+}
+
+// Logon summary between the welcome artwork and the main menu; the session supplies the pause prompt.
+export function logonCallers(rows, name, view, prompt) {
+  return custom('callers', heading(ui(view?.store, 'session_logon_last_callers'), name), view) +
+    callerRows(rows, view) + '\r\n' + prompt;
+}
+
+function callerRows(rows, view) {
+  return (ansi.cyan + ui(view?.store, 'screens_call_handle_logon_utc_min_node') + '\r\n' + (rule) + ansi.reset) +
     rows.map(row => {
       const minutes = Math.max(0, Math.floor(((row.ended_at ? Date.parse(row.ended_at) : Date.now()) - Date.parse(row.started_at)) / (SECONDS_PER_MINUTE * 1000)));
       return (ui(view?.store, 'screens_value_value_value_value_valuevalue', { VALUE1: cell(row.id, ID_WIDTH), VALUE2: cell(row.handle, HANDLE_WIDTH), VALUE3: date(row.started_at), MINUTES: cell(minutes, SHORT_FIELD_WIDTH), NODE: row.node, VALUE6: row.ended_at ? '' : ' *' }) + '\r\n');
     }).join('') +
-    (rows.length ? '' : (ui(view?.store, 'screens_no_callers_on_this_page') + '\r\n')) +
-    ('\r\n' + ui(view?.store, 'screens_connected_or_disconnect_pending_history_retains_1000_calls') + '\r\n' + ui(view?.store, 'screens_n_next_p_previous_q_main_menu'));
+    (rows.length ? '' : (ui(view?.store, 'screens_no_callers_on_this_page') + '\r\n'));
 }
 
 export function messageList(rows, page, name, view) {

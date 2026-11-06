@@ -1,4 +1,7 @@
 import { fileURLToPath } from 'node:url';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Session } from '../src/session.js';
@@ -7,9 +10,17 @@ import { LocalSocket } from '../src/local-terminal.js';
 import { Presentation } from '../src/presentation.js';
 import { ui, plainText } from '../src/strings.js';
 import { performance } from 'node:perf_hooks';
+import { setImmediate } from 'node:timers';
 
 // Bundled samples only; the private ansi/ directory is machine-specific.
 const samples = fileURLToPath(new URL('../examples/ansi', import.meta.url));
+
+// Waits for queued work started by a key press; setImmediate is never mocked here.
+async function settle(session) {
+  const deadline = process.hrtime.bigint() + 5_000_000_000n;
+  while (session.busy && process.hrtime.bigint() < deadline) await new Promise(resolve => setImmediate(resolve));
+  assert.equal(session.busy, false);
+}
 
 function fixture(t) {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 0 });
@@ -85,9 +96,84 @@ for (const replay of [false, true]) {
     assert.equal(f.frames.join(''), f.artwork + '\r\n' + ui(f.store, replay ? 'return_prompt' : 'continue_prompt'));
     assert.ok(f.session.screenHistory.includes(f.artwork.slice(4)));
     assert.equal(f.session.state, replay ? 'art' : 'post-welcome');
+    f.frames.length = 0;
     f.session.editor.feed(Buffer.from(' '));
+    if (!replay) {
+      // Last callers is on by default: one generated, unpaced screen before main.
+      await settle(f.session);
+      const callers = plainText(f.frames.join(''));
+      assert.ok(callers.includes('LAST CALLERS'));
+      assert.ok(callers.includes('Caller'));
+      assert.ok(callers.endsWith(plainText(ui(f.store, 'continue_prompt'))));
+      assert.equal(f.session.state, 'post-welcome');
+      f.session.editor.feed(Buffer.from(' '));
+    }
     assert.equal(f.session.state, 'main');
     assert.deepEqual(f.errors, []);
+  });
+}
+
+for (const lastCallers of [1, 0]) {
+  test(`welcome sequence plays numbered art in order ${lastCallers ? 'then' : 'without'} last callers`, async t => {
+    const directory = mkdtempSync(join(tmpdir(), 'nocturno-welcome-'));
+    t.after(() => rmSync(directory, { recursive: true, force: true }));
+    // welcome3.ans is deliberately missing: present screens still play in numeric order.
+    for (const [screen, art] of [['welcome', 'FIRST ART'], ['welcome2', 'SECOND ART'], ['welcome4', 'FOURTH ART']]) {
+      // Isolated temporary fixture directory.
+      // eslint-disable-next-line security/detect-non-literal-fs-filename
+      writeFileSync(join(directory, `${screen}.ans`), art);
+    }
+    const presentation = new Presentation(directory);
+    assert.deepEqual(presentation.welcomeSequence(), ['welcome', 'welcome2', 'welcome4']);
+    const store = new Store(':memory:');
+    store.initSettings('Test BBS');
+    store.updateSettings({ ...store.settings(), last_callers: lastCallers });
+    const user = store.user(store.createUser('Caller', 'test-only-hash'));
+    const frames = [], errors = [];
+    const socket = new LocalSocket(data => frames.push(data.toString('latin1')));
+    const session = new Session({ socket, store, local: true, id: 1, presentation,
+      auth: { login: async () => user }, onError: error => errors.push(error) });
+    t.after(() => { session.cleanup(); socket.destroy(); store.close(); });
+    const screen = async run => {
+      frames.length = 0;
+      await run();
+      await settle(session);
+      return plainText(frames.join(''));
+    };
+    const key = () => screen(async () => session.editor.feed(Buffer.from(' ')));
+    const continuePrompt = plainText(ui(store, 'continue_prompt'));
+    const returnPrompt = plainText(ui(store, 'return_prompt'));
+    session.state = 'login-password';
+    session.pendingHandle = user.handle;
+    let output = await screen(() => { session.queue.push('unique test password!'); return session.drain(); });
+    assert.ok(output.includes('FIRST ART') && !output.includes('SECOND ART'));
+    assert.ok(output.endsWith(continuePrompt));
+    output = await key();
+    assert.ok(output.includes('SECOND ART') && !output.includes('FOURTH ART'));
+    assert.ok(output.endsWith(continuePrompt));
+    output = await key();
+    assert.ok(output.includes('FOURTH ART'));
+    assert.ok(output.endsWith(continuePrompt));
+    assert.equal(session.state, 'post-welcome');
+    if (lastCallers) {
+      output = await key();
+      assert.ok(output.includes('LAST CALLERS'));
+      assert.match(output, /Caller +\d{4}-\d{2}-\d{2} \d{2}:\d{2} +0 +1 \*/);
+      assert.ok(output.endsWith(continuePrompt));
+      assert.equal(session.state, 'post-welcome');
+    }
+    await key();
+    assert.equal(session.state, 'main');
+    // Main A replays every welcome screen, but never the last callers list.
+    output = await screen(() => { session.queue.push('A'); return session.drain(); });
+    assert.ok(output.includes('FIRST ART') && output.endsWith(continuePrompt));
+    assert.ok((await key()).includes('SECOND ART'));
+    output = await key();
+    assert.ok(output.includes('FOURTH ART') && output.endsWith(returnPrompt));
+    assert.equal(session.state, 'art');
+    assert.ok(!(await key()).includes('LAST CALLERS'));
+    assert.equal(session.state, 'main');
+    assert.deepEqual(errors, []);
   });
 }
 
