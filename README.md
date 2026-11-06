@@ -142,6 +142,21 @@ no installed packages. Development dependencies are just lint/SAST tooling.
   Public messages and private mail start at the header's `|{BODY}` text position,
   with page sizes fitted above the page indicator and prompt on rows 23-24.
   Full subjects/base names appear below the header only if they do not fit its fields.
+- **New-message scan.** Each caller has a private read pointer per message
+  base. After logon the welcome prompt shows the total of new messages
+  (for example "You have 12 new messages."). The base list shows `(N new)`
+  beside each base, and the message list marks new messages with `*` after the ID.
+  `S` in the base list, message list or reader opens the oldest new message,
+  starting in the current base and continuing through later bases (wrapping
+  around). Pressing `S` again moves to the next new message; "No new messages."
+  appears when none remain. `C` in the message list marks the whole base read.
+  Reading any message also marks earlier messages in that base read, like a
+  classic last-read pointer. Moderated posts count as new when they are
+  approved, not when submitted, so approval never hides them behind the pointer.
+  Pending, rejected and removed posts never count, and bases without a live
+  read grant are skipped. QWK exports and the local console do not move pointers.
+  Upgraded boards start every caller with all existing messages new; `C` per
+  base catches up.
 - Local blue sysop **waiting-for-callers** dashboard with UTC statistics and
   live node status, keyboard menus, persistent settings, user management,
   message moderation, caller history, node watching/hangup, live sysop chat,
@@ -572,7 +587,7 @@ Enter. `?` immediately displays this list in the BBS.
 | `C` | Own user configuration |
 | `U` | Public user listing |
 | `F` | File catalog and ZMODEM transfers |
-| `M` | Public message menu |
+| `M` | Public message menu (`S` scans new messages) |
 | `S` | Private note to the local sysop |
 | `K` | QWK offline public mail |
 | `O` | Automessage |

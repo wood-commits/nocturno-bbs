@@ -117,6 +117,28 @@ export class Store {
     if (!this.db.prepare('PRAGMA table_info(messages)').all().some(column => column.name === 'pending')) {
       this.db.exec('ALTER TABLE messages ADD COLUMN pending INTEGER NOT NULL DEFAULT 0 CHECK (pending IN (0, 1))');
     }
+    if (!this.db.prepare('PRAGMA table_info(messages)').all().some(column => column.name === 'scan_seq')) {
+      // Visibility order for new-message scans. Moderated posts receive a sequence
+      // only when approved, so they are still "new" even though their IDs are older.
+      this.db.exec('BEGIN IMMEDIATE');
+      try {
+        this.db.exec(`ALTER TABLE messages ADD COLUMN scan_seq INTEGER;
+          UPDATE messages SET scan_seq = id WHERE pending = 0 AND removed = 0;`);
+        this.db.exec('COMMIT');
+      } catch (error) {
+        this.db.exec('ROLLBACK');
+        throw error;
+      }
+    }
+    this.db.exec(`
+      CREATE INDEX IF NOT EXISTS messages_scan ON messages(base_id, scan_seq);
+      CREATE TABLE IF NOT EXISTS message_reads (
+        user_id INTEGER NOT NULL REFERENCES users(id),
+        base_id INTEGER NOT NULL REFERENCES message_bases(id),
+        last_seq INTEGER NOT NULL CHECK (last_seq >= 0),
+        PRIMARY KEY (user_id, base_id)
+      );
+    `);
     this.db.exec(`CREATE TABLE IF NOT EXISTS message_moderation (
       base_id INTEGER PRIMARY KEY REFERENCES message_bases(id),
       enabled INTEGER NOT NULL CHECK (enabled IN (0, 1))
@@ -249,6 +271,7 @@ export class Store {
         .run(`Deleted user #${user.id}`, user.id);
       this.db.prepare('DELETE FROM community_profiles WHERE user_id = ?').run(user.id);
       this.db.prepare('DELETE FROM caller_limit_users WHERE user_id = ?').run(user.id);
+      this.db.prepare('DELETE FROM message_reads WHERE user_id = ?').run(user.id);
       this.db.exec('COMMIT');
     } catch (error) {
       this.db.exec('ROLLBACK');
@@ -348,9 +371,11 @@ export class Store {
     if (this.db.prepare('SELECT count(*) AS n FROM messages').get().n >= 100000) {
       throw new InputError('Message base is full. Contact the sysop.');
     }
+    const pending = Number(this.moderation(baseId));
     return this.db.prepare(
-      'INSERT INTO messages(user_id, subject, body, created_at, base_id, reply_to, pending) VALUES (?, ?, ?, ?, ?, ?, ?)'
-    ).run(userId, subject.trim(), body.trim(), new Date().toISOString(), baseId, replyTo, Number(this.moderation(baseId))).lastInsertRowid;
+      `INSERT INTO messages(user_id, subject, body, created_at, base_id, reply_to, pending, scan_seq) VALUES (?, ?, ?, ?, ?, ?, ?,
+        CASE WHEN ? THEN NULL ELSE (SELECT coalesce(max(scan_seq), 0) + 1 FROM messages) END)`
+    ).run(userId, subject.trim(), body.trim(), new Date().toISOString(), baseId, replyTo, pending, pending).lastInsertRowid;
   }
 
   moderation(baseId) {
@@ -372,8 +397,10 @@ export class Store {
   decideMessage(id, approved) {
     if (typeof approved !== 'boolean') throw new InputError('moderation_invalid');
     if (!this.db.prepare(`UPDATE messages SET pending = 0, removed = ?,
-      subject = CASE WHEN ? THEN subject ELSE '' END, body = CASE WHEN ? THEN body ELSE '' END
-      WHERE id = ? AND pending = 1 AND removed = 0`).run(Number(!approved), Number(approved), Number(approved), id).changes) {
+      subject = CASE WHEN ? THEN subject ELSE '' END, body = CASE WHEN ? THEN body ELSE '' END,
+      scan_seq = CASE WHEN ? THEN (SELECT coalesce(max(scan_seq), 0) + 1 FROM messages) ELSE NULL END
+      WHERE id = ? AND pending = 1 AND removed = 0`)
+      .run(Number(!approved), Number(approved), Number(approved), Number(approved), id).changes) {
       throw new InputError('moderation_pending_missing');
     }
   }

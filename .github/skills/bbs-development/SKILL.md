@@ -197,6 +197,14 @@ Follow the byte-to-screen path:
   and unapproval keep earned credit. Ordinary downloads debit their full size
   before starting binary output, without abort refunds; counts still require
   successful completion. QWK/REP and mail are exempt from file byte ratios.
+- New-message scan: messages.scan_seq (additive; backfilled once from IDs for
+  visible rows) is assigned from max+1 when a post becomes visible, on insert or
+  moderation approval, and cleared on rejection. message_reads keeps one caller-owned
+  last_seq per base, only advanced with max(). Readers mark on every render;
+  S scans current base first then wraps by base ID; C catches up. Counts and
+  scans go through Access with live read grants and skip pending/removed rows.
+  Deleting a user clears its pointers. The logon summary shares the welcome
+  prompt row so it never scrolls artwork. Local console and QWK leave pointers alone.
 - Message-list M toggles per-base approval with YES; T opens pending posts.
   Pending queues accept numeric reads, A ID approval and R ID rejection with
   YES. Callers, statistics and QWK export must exclude pending rows; validate

@@ -191,7 +191,58 @@ export class Access {
   messages(userId, page, baseId) {
     this.requireMessage(userId, baseId);
     pageNumber(page);
-    return this.store.messages(page, baseId);
+    const rows = this.store.messages(page, baseId);
+    const lastSeq = this.lastRead(userId, baseId);
+    const sequence = this.db.prepare('SELECT scan_seq FROM messages WHERE id = ?');
+    return rows.map(row => ({ ...row, unread: (sequence.get(row.id)?.scan_seq ?? 0) > lastSeq }));
+  }
+
+  // Caller-owned new-message pointers: one high-water mark of scan_seq per base.
+  lastRead(userId, baseId) {
+    return this.db.prepare('SELECT last_seq FROM message_reads WHERE user_id = ? AND base_id = ?')
+      .get(userId, baseId)?.last_seq ?? 0;
+  }
+
+  advanceRead(userId, baseId, sequence) {
+    if (!Number.isSafeInteger(sequence) || sequence < 1) return;
+    this.db.prepare(`INSERT INTO message_reads(user_id, base_id, last_seq) VALUES (?, ?, ?)
+      ON CONFLICT(user_id, base_id) DO UPDATE SET last_seq = max(last_seq, excluded.last_seq)`)
+      .run(userId, baseId, sequence);
+  }
+
+  markRead(userId, messageId, baseId) {
+    this.requireMessage(userId, baseId);
+    const row = this.db.prepare(`SELECT scan_seq FROM messages
+      WHERE id = ? AND base_id = ? AND removed = 0 AND pending = 0`).get(messageId, baseId);
+    this.advanceRead(userId, baseId, row?.scan_seq);
+  }
+
+  catchUp(userId, baseId) {
+    this.requireMessage(userId, baseId);
+    const { sequence } = this.db.prepare(`SELECT max(scan_seq) AS sequence FROM messages
+      WHERE base_id = ? AND removed = 0 AND pending = 0`).get(baseId);
+    this.advanceRead(userId, baseId, sequence);
+  }
+
+  unreadCounts(userId) {
+    const user = this.caller(userId);
+    return new Map(this.db.prepare(`SELECT m.base_id, count(*) AS n FROM messages m
+      JOIN message_permissions p ON p.base_id = m.base_id AND p.role_id = ? AND p.can_read = 1
+      LEFT JOIN message_reads r ON r.user_id = ? AND r.base_id = m.base_id
+      WHERE m.removed = 0 AND m.pending = 0 AND m.scan_seq > coalesce(r.last_seq, 0)
+      GROUP BY m.base_id`).all(user.role_id, userId).map(row => [row.base_id, row.n]));
+  }
+
+  // The oldest unread message in the current base, then later bases, wrapping around.
+  nextUnread(userId, fromBaseId) {
+    const user = this.caller(userId);
+    const row = this.db.prepare(`SELECT m.id, m.base_id FROM messages m
+      JOIN message_permissions p ON p.base_id = m.base_id AND p.role_id = ? AND p.can_read = 1
+      LEFT JOIN message_reads r ON r.user_id = ? AND r.base_id = m.base_id
+      WHERE m.removed = 0 AND m.pending = 0 AND m.scan_seq > coalesce(r.last_seq, 0)
+      ORDER BY CASE WHEN m.base_id = ? THEN 0 WHEN m.base_id > ? THEN 1 ELSE 2 END, m.base_id, m.scan_seq
+      LIMIT 1`).get(user.role_id, userId, fromBaseId, fromBaseId);
+    return row && { id: row.id, base_id: row.base_id };
   }
 
   message(userId, messageId, baseId) {

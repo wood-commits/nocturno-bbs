@@ -113,9 +113,10 @@ export class Session extends EventEmitter {
     if (this.state === 'sysop-chat') return '';
     if (this.state === 'welcome') return 'LNCSQ';
     if (this.state === 'main') return mainChoices.map(([key]) => key).join('') + 'A?';
-    if (this.state === 'read') return 'RNPQ';
-    if (['users', 'callers', 'bases'].includes(this.state)) return 'NPQ';
-    if (this.state === 'messages') return 'WBNPQ';
+    if (this.state === 'read') return 'RSNPQ';
+    if (this.state === 'bases') return 'SNPQ';
+    if (['users', 'callers'].includes(this.state)) return 'NPQ';
+    if (this.state === 'messages') return 'WSCBNPQ';
     if (this.state === 'doors') return '1Q';
     if (this.state === 'realm') return 'ETHBFMWLCNP?Q';
     if (this.state === 'transfer-files') return 'UBNPQ';
@@ -152,6 +153,7 @@ export class Session extends EventEmitter {
     const row = this.store.access.message(this.user.id, this.reading.id, this.baseId);
     if (!row) throw new InputError('Message no longer exists.');
     this.reading = row;
+    this.store.access.markRead(this.user.id, row.id, this.baseId);
     this.write(screens.readMessage(row, this.readPage, this.name, this.view({
       PAGE: this.readPage + 1, MESSAGEID: row.id, MESSAGEAUTHOR: row.handle,
       MESSAGESUBJECT: row.subject, MESSAGEDATE: screens.date(row.created_at)
@@ -379,7 +381,7 @@ export class Session extends EventEmitter {
     this.drawMenu(notice);
   }
 
-  async welcomeArt(title, prompt) {
+  async welcomeArt(title, prompt, summary = '') {
     const fallback = screens.heading(ui(this.store, title), this.name);
     const artwork = String(this.presentation?.render('welcome', fallback, this.view().values) ?? fallback);
     // Keep CSI controls and CRLF intact for screen history and local node watchers.
@@ -415,7 +417,8 @@ export class Session extends EventEmitter {
       this.cancelWelcome = undefined;
       this.welcomePlayback = false;
     }
-    if (!this.closed && !this.socket.destroyed) this.write('\r\n' + ui(this.store, prompt));
+    // The summary shares the prompt row so it never scrolls fixed artwork.
+    if (!this.closed && !this.socket.destroyed) this.write('\r\n' + summary + ui(this.store, prompt));
   }
 
   menu() {
@@ -435,7 +438,11 @@ export class Session extends EventEmitter {
   showList() {
     if (this.state === 'users') this.write(screens.userList(this.store.users(this.page), this.page, this.name, this.view()));
     else if (this.state === 'callers') this.write(screens.callerList(this.store.callers(this.page), this.page, this.name, this.view()));
-    else if (this.state === 'bases') this.write(screens.baseList(this.store.access.messageBases(this.user.id, this.page), this.page, this.name, this.view()));
+    else if (this.state === 'bases') {
+      const unread = this.store.access.unreadCounts(this.user.id);
+      const rows = this.store.access.messageBases(this.user.id, this.page).map(row => ({ ...row, unread: unread.get(row.id) ?? 0 }));
+      this.write(screens.baseList(rows, this.page, this.name, this.view()));
+    }
     else this.write(screens.messageList(this.store.access.messages(this.user.id, this.page, this.baseId), this.page, this.name, this.view()));
   }
 
@@ -506,7 +513,9 @@ export class Session extends EventEmitter {
       this.pendingHandle = undefined;
       this.checkDailyTime();
       this.state = 'post-welcome';
-      await this.welcomeArt('session_welcome', 'continue_prompt');
+      const unread = [...this.store.access.unreadCounts(user.id).values()].reduce((sum, count) => sum + count, 0);
+      await this.welcomeArt('session_welcome', 'continue_prompt',
+        unread ? this.string('message_new_summary', { COUNT: unread }) : '');
     } else if (!this.user) {
       throw new Error('Authenticated state without a caller');
     } else if (this.state === 'main') {
@@ -567,6 +576,13 @@ export class Session extends EventEmitter {
       }
     } else if (['users', 'callers', 'messages', 'bases'].includes(this.state)) {
       if (command === 'Q') return this.menu();
+      if (['messages', 'bases'].includes(this.state) && command === 'S') return this.scanNew();
+      if (this.state === 'messages' && command === 'C') {
+        this.store.access.catchUp(this.user.id, this.baseId);
+        this.showList();
+        this.write('\r\n' + this.string('message_caught_up') + '\r\n' + this.prompt());
+        return;
+      }
       if (this.state === 'messages' && command === 'B') {
         this.state = 'bases';
         this.page = 0;
@@ -609,6 +625,7 @@ export class Session extends EventEmitter {
         return this.showList();
       }
       if (command === 'R') return this.composePost(this.reading);
+      if (command === 'S') return this.scanNew();
       const layout = screens.messageLayout(this.view(), this.reading);
       const { pages } = screens.messagePage(this.reading.body, 0, layout.pageSize, layout.width);
       if (command === 'N') this.readPage = Math.min(pages - 1, this.readPage + 1);
@@ -641,6 +658,25 @@ export class Session extends EventEmitter {
         this.write(this.string('body_prompt'));
       }
     }
+  }
+
+  // Open the oldest unread message, starting in the current base and wrapping
+  // through the other readable bases. Reading it advances that base's pointer.
+  scanNew() {
+    const next = this.store.access.nextUnread(this.user.id, this.baseId);
+    if (!next) {
+      this.reading = undefined;
+      this.state = this.store.access.messagePermissions(this.user.role_id, this.baseId)?.can_read ? 'messages' : 'bases';
+      if (this.state === 'bases') this.page = 0;
+      this.showList();
+      this.write('\r\n' + this.string('message_scan_none') + '\r\n' + this.prompt());
+      return;
+    }
+    this.baseId = next.base_id;
+    this.reading = { id: next.id };
+    this.readPage = 0;
+    this.state = 'read';
+    this.readScreen();
   }
 
   cancelPost() {

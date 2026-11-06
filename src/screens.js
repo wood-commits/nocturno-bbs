@@ -143,7 +143,8 @@ export function callerList(rows, page, name, view) {
 export function messageList(rows, page, name, view) {
   return custom('messages', heading(ui(view?.store, 'screens_value_message_base_page_value', { VALUE1: safeText(view?.values.BASENAME ?? 'General').toUpperCase(), VALUE2: page + 1 }), name), view) +
     (ansi.cyan + ui(view?.store, 'screens_msg_from_subject') + '\r\n' + (rule) + ansi.reset) +
-    rows.map(row => (ui(view?.store, 'screens_value_value_value', { VALUE1: cell(row.id, ID_WIDTH), VALUE2: cell(row.handle, HANDLE_WIDTH), VALUE3: cell(row.subject, SUBJECT_COLUMN_WIDTH) }) + '\r\n')).join('') +
+    // A trailing * marks messages newer than the caller's read pointer.
+    rows.map(row => (ui(view?.store, 'screens_value_value_value', { VALUE1: cell(`${row.id}${row.unread ? '*' : ''}`, ID_WIDTH + 1), VALUE2: cell(row.handle, HANDLE_WIDTH), VALUE3: cell(row.subject, SUBJECT_COLUMN_WIDTH) }) + '\r\n')).join('') +
     (rows.length ? '' : (ui(view?.store, 'screens_no_messages_on_this_page_start_a_conversation') + '\r\n')) +
     ('\r\n' + ui(view?.store, 'screens_id_read_w_write_b_bases_n_p_page_q_main_menu'));
 }
@@ -212,7 +213,8 @@ export function baseList(rows, page, name, view) {
     (ansi.cyan + ui(view?.store, 'screens_base_id_name_description') + '\r\n' + rule + ansi.reset) +
     rows.map(row => {
       const description = cell(row.description, TEXT_WIDTH).trimEnd();
-      return ui(view?.store, 'screens_value_value_3', { VALUE1: safeText(row.id).padStart(BASE_ID_WIDTH), VALUE2: cell(row.name, BOARD_NAME_WIDTH).trimEnd() }) + '\r\n' +
+      return ui(view?.store, 'screens_value_value_3', { VALUE1: safeText(row.id).padStart(BASE_ID_WIDTH), VALUE2: cell(row.name, BOARD_NAME_WIDTH).trimEnd() }) +
+        (row.unread ? ui(view?.store, 'message_base_new_count', { COUNT: row.unread }) : '') + '\r\n' +
         (description ? ui(view?.store, 'screens_value_7', { VALUE3: description }) + '\r\n' : '');
     }).join('') + '\r\n' +
     ui(view?.store, 'screens_id_open_base_n_p_page_q_main_menu');
