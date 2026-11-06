@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Auth, AttemptLimiter, hashPassword, verifyPassword } from '../src/auth.js';
-import { Store } from '../src/store.js';
+import { Auth, AttemptLimiter, addressKey, hashPassword, verifyPassword } from '../src/auth.js';
+import { Store, PENDING_APPLICATION_LIMIT } from '../src/store.js';
 import { InputError } from '../src/validation.js';
 
 test('scrypt uses unique salts and verifies passwords without storing plaintext', async () => {
@@ -105,4 +105,33 @@ test('disabling an account or closing registration during hashing is enforced', 
   await assert.rejects(registration, /closed/);
   assert.equal(store.findUser('NewCaller'), undefined);
   await assert.rejects(auth.register('NewCaller', 'unique testing password', 'local'), /closed/);
+});
+test('address keys group IPv6 callers by /64 so rotation cannot bypass per-address limits', async t => {
+  assert.equal(addressKey('203.0.113.9'), '203.0.113.9');
+  assert.equal(addressKey('::ffff:203.0.113.9'), '203.0.113.9');
+  assert.equal(addressKey('2001:db8:1:2:aaaa::1'), '2001:db8:1:2::/64');
+  assert.equal(addressKey('2001:0DB8:0001:0002:ffff:ffff:ffff:fffe'), '2001:db8:1:2::/64');
+  assert.equal(addressKey('2001:db8::1%eth0'), '2001:db8:0:0::/64');
+  assert.equal(addressKey('::1'), '0:0:0:0::/64');
+  assert.equal(addressKey(undefined), 'unknown');
+  const store = new Store(':memory:');
+  t.after(() => store.close());
+  const auth = new Auth(store);
+  await auth.init();
+  auth.limiter = new AttemptLimiter({ limit: 1 });
+  await assert.rejects(auth.login('Nobody', 'incorrect password', '2001:db8:1:2::10'), /Invalid/);
+  await assert.rejects(auth.login('Nobody', 'incorrect password', '2001:db8:1:2::11'), /Too many/);
+  await assert.rejects(auth.login('Nobody', 'incorrect password', '2001:db8:1:3::10'), /Invalid/);
+});
+
+test('anonymous applications are bounded by a pending review queue', t => {
+  const store = new Store(':memory:');
+  t.after(() => store.close());
+  store.db.prepare(`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ?)
+    INSERT INTO users(handle, password_hash, created_at, application_status)
+    SELECT 'Applicant_' || i, 'test-only-hash', '2026-01-01', 'pending' FROM n`).run(PENDING_APPLICATION_LIMIT);
+  assert.throws(() => store.createUser('One_More', 'test-only-hash', true), /application queue is full/);
+  assert.ok(store.createUser('Local_Seed', 'test-only-hash'));
+  store.decideApplication(store.findUser('Applicant_1').id, false);
+  assert.ok(store.createUser('One_More', 'test-only-hash', true));
 });

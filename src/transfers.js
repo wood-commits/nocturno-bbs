@@ -9,7 +9,7 @@ import { heading } from './screens.js';
 
 export const TRANSFER_LIMITS = Object.freeze({
   file: 4 * 1024 * 1024, total: 64 * 1024 * 1024, count: 1000,
-  concurrent: 4, idleMs: 30000, durationMs: 120000
+  concurrent: 4, idleMs: 30000, durationMs: 120000, pendingPerUser: 5
 });
 
 export function initializeTransfers(db) {
@@ -122,6 +122,13 @@ export class Transfers {
     this.store.db.prepare('UPDATE transfer_files SET removed = 1, approved = 0, name = \'\', description = \'\' WHERE id = ?').run(id);
   }
 
+  // One caller's unreviewed uploads must not consume the shared live payload/ID budget.
+  requireUploadSlot(userId) {
+    const { count } = this.store.db.prepare(`SELECT count(*) AS count FROM transfer_files
+      WHERE user_id = ? AND approved = 0 AND removed = 0`).get(userId);
+    if (count >= TRANSFER_LIMITS.pendingPerUser) throw new InputError('error_pending_upload_limit');
+  }
+
   storagePath(key) {
     if (!/^[0-9a-f-]{36}\.bin$/.test(key)) throw new Error('Invalid internal file storage key');
     return join(this.directory, key);
@@ -139,6 +146,7 @@ export class Transfers {
     try {
       this.caller(userId, true);
       this.store.access.requireFile(userId, baseId, 'upload');
+      this.requireUploadSlot(userId);
       const { count } = this.store.db.prepare('SELECT count(*) AS count FROM transfer_files').get();
       const { size } = this.store.db.prepare('SELECT coalesce(sum(size), 0) AS size FROM transfer_files WHERE removed = 0').get();
       if (count >= TRANSFER_LIMITS.count || size + data.length > TRANSFER_LIMITS.total) throw new InputError('File storage is full. Contact the sysop.');
@@ -274,6 +282,7 @@ export class Transfers {
       this.show(session);
     } else if (command === 'U' && session.state !== 'transfer-bases') {
       this.caller(session.user.id, true);
+      if (!qwk) this.requireUploadSlot(session.user.id);
       this.begin(session, { direction: 'receive', kind: qwk ? 'reply' : 'upload' });
     } else if (command === 'D' && qwk) {
       this.begin(session, { direction: 'send', kind: 'qwk', file: { name: `${QWK_ID}.QWK`, data: this.qwk(session.user.id) } });

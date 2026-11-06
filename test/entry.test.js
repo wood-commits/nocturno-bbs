@@ -10,6 +10,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { readJson, writeJson } from '../src/mcp-transport.js';
+import { mcpProof } from '../src/mcp-server.js';
 import { Store } from '../src/store.js';
 import { Presentation } from '../src/presentation.js';
 
@@ -85,12 +86,18 @@ test('clean checkout creates its default database, loads samples and serves teln
   const messages = [];
   readJson(ipc, value => messages.push(value), error => assert.fail(error.message));
   await once(ipc, 'connect');
-  writeJson(ipc, { token });
   while (!messages.length) {
     assert.ok(Date.now() < deadline, 'MCP startup timed out');
     await delay(5);
   }
-  assert.deepEqual(messages.shift(), { ready: true });
+  const { challenge } = messages.shift();
+  const nonce = randomBytes(32).toString('hex');
+  writeJson(ipc, { client: nonce, proof: mcpProof(token, 'client', challenge, nonce) });
+  while (!messages.length) {
+    assert.ok(Date.now() < deadline, 'MCP startup timed out');
+    await delay(5);
+  }
+  assert.deepEqual(messages.shift(), { ready: true, proof: mcpProof(token, 'server', challenge, nonce) });
   writeJson(ipc, { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-11-25' } });
   while (!messages.length) {
     assert.ok(Date.now() < deadline, 'MCP initialization timed out');

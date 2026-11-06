@@ -19,6 +19,23 @@ export async function verifyPassword(value, encoded) {
   return timingSafeEqual(key, Buffer.from(match[2], 'hex'));
 }
 
+// Per-address quotas key IPv6 callers by /64: one subscriber can rotate addresses freely.
+export function addressKey(address) {
+  if (typeof address !== 'string' || !address) return 'unknown';
+  const value = address.toLowerCase().replace(/%.*$/, '');
+  const mapped = /^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/.exec(value);
+  if (mapped) return mapped[1];
+  if (!value.includes(':')) return value;
+  const [head, tail = ''] = value.split('::');
+  const left = head ? head.split(':') : [];
+  const right = tail ? tail.split(':') : [];
+  // An embedded IPv4 suffix only occupies interface-ID bits; the /64 prefix is unaffected.
+  const groups = value.includes('::')
+    ? [...left, ...Array(Math.max(0, 8 - left.length - right.length)).fill('0'), ...right]
+    : left;
+  return `${groups.slice(0, 4).map(group => (group || '0').replace(/^0+(?=.)/, '')).join(':')}::/64`;
+}
+
 export class AttemptLimiter {
   constructor({ limit = 10, windowMs = 900000, maxEntries = 4096, now = Date.now } = {}) {
     Object.assign(this, { limit, windowMs, maxEntries, now });
@@ -54,7 +71,7 @@ export class Auth {
   }
 
   async run(address, operation) {
-    if (!this.limiter.take(address)) throw new InputError('Too many attempts. Try again in 15 minutes.');
+    if (!this.limiter.take(addressKey(address))) throw new InputError('Too many attempts. Try again in 15 minutes.');
     if (this.active >= 4) throw new InputError('Authentication is busy. Please try again later.');
     this.active++;
     try { return await operation(); }

@@ -45,7 +45,9 @@ Follow the byte-to-screen path:
     See ANSI.md for per-screen tokens; list rows and message bodies stay generated.
     Private `ansi` is ignored by Git. If absent, load original `examples/ansi`;
     an existing private directory uses built-in fallbacks for missing files.
-    Tests of bundled screens explicitly select the sample directory; clean-checkout
+    Tests of bundled screens explicitly select the sample directory (every
+    createBbs/Presentation fixture except deliberate default-lookup entry tests:
+    private welcome art is paced at 28.8k and made logins take ~7 s); clean-checkout
     entry tests copy only publishable files and create temporary default data.
     `src/string-catalog.js` defines editable defaults; `src/strings.js` renders
     trusted Renegade pipe templates with sanitized, one-pass substitutions.
@@ -73,6 +75,9 @@ Follow the byte-to-screen path:
       shared sysop keyboard/controller adapter. `src/mcp-transport.js` bounds
       newline-delimited JSON. Never add a network MCP listener or telnet sysop
       route. Require BBS_MCP_SYSOP=1 for local automation console authority.
+      IPC authentication is a mutual HMAC-SHA256 challenge-response (server
+      challenge, client nonce/proof, server proof); never send the raw token,
+      and the bridge forwards nothing until the server proof verifies.
       Preserve client-owned terminals, ordinary user authentication/live grants,
       YES confirmations, hidden password output and sanitized error reporting.
       Close owned callers and detach watchers/chat on client disconnect.
@@ -353,5 +358,9 @@ Follow the byte-to-screen path:
   completion notices survive redraws, and Messages starts selected. Main selection
   survives arrow/direct navigation, sections, door commands, help and artwork.
 - Limits are process-local and shared-IP callers share admission quotas.
+  Key every per-address quota with auth.addressKey (IPv6 /64, IPv4-mapped to
+  IPv4). Anonymous growth stays bounded below permanent caps: 100 pending
+  applications, guest notes 3/address/hour and 1,000 of 10,000 notifications,
+  and five unapproved uploads per user (checked before the transfer starts).
 - Data and keys are sensitive; isolate temporary test data and never touch live
   databases. Only one process may own a database.

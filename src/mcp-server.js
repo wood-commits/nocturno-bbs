@@ -1,5 +1,5 @@
 import net from 'node:net';
-import { timingSafeEqual } from 'node:crypto';
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { chmodSync } from 'node:fs';
 import { isAbsolute } from 'node:path';
 import { McpTerminal } from './mcp-terminal.js';
@@ -21,6 +21,18 @@ const tools = [
   { name: 'bbs_close', description: 'Close this MCP client-owned terminal; local-login callers disconnect and watched remote callers stay connected.',
     inputSchema: schema({ sessionId: sessionProperty }, ['sessionId']) }
 ];
+
+// Mutual proof of the shared token: neither side ever sends the token itself, so a
+// process squatting the endpoint learns nothing reusable and cannot pose as the BBS.
+export function mcpProof(token, role, challenge, client) {
+  return createHmac('sha256', Buffer.from(token, 'hex'))
+    .update(`nocturno-mcp-${role}\n${challenge}\n${client}`).digest('hex');
+}
+
+export function proofMatches(expected, value) {
+  return typeof value === 'string' && /^[a-f0-9]{64}$/.test(value) &&
+    timingSafeEqual(Buffer.from(value, 'hex'), Buffer.from(expected, 'hex'));
+}
 
 export function validateMcpOptions({ endpoint, token, sysop = false }) {
   if (typeof token !== 'string' || !/^[a-fA-F0-9]{64}$/.test(token)) {
@@ -59,6 +71,8 @@ export async function startMcpServer({ endpoint, token, sysop = false, store, bb
     const send = value => { if (!socket.destroyed && !disconnected) writeJson(socket, value); };
     const result = (id, value) => send({ jsonrpc: '2.0', id, result: value });
     const rpcError = (id, code, message) => send({ jsonrpc: '2.0', id, error: { code, message } });
+    const challenge = randomBytes(32).toString('hex');
+    send({ challenge });
     const callTool = async ({ name, arguments: args = {} } = {}) => {
       const tool = tools.find(tool => tool.name === name);
       if (!tool) throw new InputError('Unknown MCP tool.');
@@ -115,15 +129,14 @@ export async function startMcpServer({ endpoint, token, sysop = false, store, bb
     const dispatch = async message => {
       if (socket.destroyed || disconnected) return;
       if (!authenticated) {
-        if (!message || typeof message.token !== 'string' ||
-          !/^[a-fA-F0-9]{64}$/.test(message.token) ||
-          !timingSafeEqual(Buffer.from(message.token, 'hex'), Buffer.from(token, 'hex'))) {
+        if (!message || typeof message.client !== 'string' || !/^[a-f0-9]{64}$/.test(message.client) ||
+          !proofMatches(mcpProof(token, 'client', challenge, message.client), message.proof)) {
           socket.destroy();
           return;
         }
         authenticated = true;
         socket.setTimeout(30 * 60000);
-        send({ ready: true });
+        send({ ready: true, proof: mcpProof(token, 'server', challenge, message.client) });
         return;
       }
       if (!message || message.jsonrpc !== '2.0' || typeof message.method !== 'string' ||

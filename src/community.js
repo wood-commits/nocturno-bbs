@@ -1,7 +1,10 @@
 import { ui, uiText, errorText } from './strings.js';
 import { InputError, text, messageBody, username, safeText } from './validation.js';
 import { heading, messageLayout, messagePage, readMessage } from './screens.js';
+import { AttemptLimiter, addressKey } from './auth.js';
 
+export const GUEST_NOTE_CAPACITY = 1000;
+export const GUEST_NOTES_PER_HOUR = 3;
 const PAGE_SIZE = 10;
 const MAX_PAGE = 9999;
 const features = new Set(['email', 'config', 'automessage', 'bbs', 'oneliners',
@@ -89,6 +92,7 @@ export class Community {
     this.store = store;
     this.db = store.db;
     this.guestNotes = new WeakSet();
+    this.guestLimiter = new AttemptLimiter({ limit: GUEST_NOTES_PER_HOUR, windowMs: 3600000 });
   }
 
   enabled(userId, posting = false) {
@@ -251,6 +255,13 @@ export class Community {
     const now = userId === undefined ? Date.now() : this.rate(userId, kind, kind === 'page' ? 300000 : 60000);
     if (this.db.prepare('SELECT count(*) AS n FROM community_notifications').get().n >= 10000) {
       throw new InputError('Sysop notification capacity reached.');
+    }
+    if (userId === undefined) {
+      // Anonymous notes are bounded separately so they cannot exhaust member notes/pages.
+      if (this.db.prepare('SELECT count(*) AS n FROM community_notifications WHERE user_id IS NULL').get().n >=
+          GUEST_NOTE_CAPACITY || !this.guestLimiter.take(addressKey(session.socket?.remoteAddress))) {
+        throw new InputError('error_guest_note_limit');
+      }
     }
     const result = this.db.prepare(`INSERT INTO community_notifications(kind, user_id, node, body, created_at)
       VALUES (?, ?, ?, ?, ?)`).run(kind, userId ?? null, session.id, body, new Date(now).toISOString());

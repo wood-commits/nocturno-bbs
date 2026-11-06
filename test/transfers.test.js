@@ -573,8 +573,8 @@ test('transfers enforce idle and absolute deadlines and release raw mode on clea
 test('file quotas count retained IDs and live bytes before writing disk content', t => {
   const f = fixture(t);
   f.store.db.prepare(`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i < 16)
-    INSERT INTO transfer_files(user_id, name, storage_key, size, created_at)
-    SELECT ?, 'quota', 'quota-' || i, 4194304, '2026-01-01' FROM n`).run(f.user);
+    INSERT INTO transfer_files(user_id, name, storage_key, size, approved, created_at)
+    SELECT ?, 'quota', 'quota-' || i, 4194304, 1, '2026-01-01' FROM n`).run(f.user);
   assert.throws(() => f.transfers.save(f.user, 'a', Buffer.from('a')), /full/);
   f.store.db.exec('DELETE FROM transfer_files');
   f.store.db.prepare(`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i < 1000)
@@ -651,4 +651,25 @@ test('transfer storage directory is created only when saving a permitted upload'
   transfers.save(f.user, 'test.bin', Buffer.from('data'));
   // eslint-disable-next-line security/detect-non-literal-fs-filename
   assert.equal(existsSync(directory), true);
+});
+
+test('one caller cannot fill shared storage with uploads awaiting approval', async t => {
+  const f = fixture(t);
+  const other = f.store.createUser('Caller_2', 'test-only-hash');
+  const ids = [];
+  for (let index = 0; index < TRANSFER_LIMITS.pendingPerUser; index++) {
+    ids.push(f.transfers.save(f.user, `pending-${index}`, Buffer.from('x')));
+  }
+  assert.throws(() => f.transfers.save(f.user, 'over', Buffer.from('x')), /awaiting approval/);
+  // The binary transfer is refused before any upload bytes are accepted.
+  const s = session(f);
+  f.transfers.menu(s);
+  await assert.rejects(f.transfers.handle(s, 'U'), /awaiting approval/);
+  assert.equal(f.transfers.active.size, 0);
+  assert.ok(f.transfers.save(other, 'other', Buffer.from('x')));
+  f.transfers.approve(ids[0]);
+  f.transfers.remove(ids[1]);
+  assert.ok(f.transfers.save(f.user, 'after-review-1', Buffer.from('x')));
+  assert.ok(f.transfers.save(f.user, 'after-review-2', Buffer.from('x')));
+  assert.throws(() => f.transfers.save(f.user, 'over', Buffer.from('x')), /awaiting approval/);
 });

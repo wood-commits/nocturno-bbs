@@ -5,12 +5,18 @@ import { once } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { setTimeout as delay } from 'node:timers/promises';
 import { Store } from '../src/store.js';
-import { createBbs } from '../src/server.js';
+import { fileURLToPath } from 'node:url';
+import { createBbs as startBbs } from '../src/server.js';
 import { startSysopConsole } from '../src/sysop.js';
 import { terminalText } from '../src/local-terminal.js';
 import { ansi } from '../src/screens.js';
 import { terminal } from './helpers/ansi-terminal.js';
 import { plainText } from '../src/strings.js';
+
+// Never load the operator's private, Git-ignored ansi/ directory: its artwork
+// can be large and is paced at 28.8k, making results machine-dependent.
+const samples = fileURLToPath(new URL('../examples/ansi', import.meta.url));
+const createBbs = options => startBbs({ ansiDirectory: samples, ...options });
 
 const secret = 'unique console password';
 

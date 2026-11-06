@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Session } from '../src/session.js';
@@ -7,6 +8,9 @@ import { Presentation } from '../src/presentation.js';
 import { ui, plainText } from '../src/strings.js';
 import { performance } from 'node:perf_hooks';
 
+// Bundled samples only; the private ansi/ directory is machine-specific.
+const samples = fileURLToPath(new URL('../examples/ansi', import.meta.url));
+
 function fixture(t) {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 0 });
   t.mock.method(performance, 'now', () => Date.now());
@@ -14,7 +18,7 @@ function fixture(t) {
   store.initSettings('Test BBS');
   const user = store.user(store.createUser('Caller', 'test-only-hash'));
   const artwork = '\x1b[0m\x1b[2J' + ('\x1b[1;36m' + '\xb1'.repeat(71) + '\r\n').repeat(36);
-  const presentation = new Presentation();
+  const presentation = new Presentation(samples);
   const render = presentation.render.bind(presentation);
   t.mock.method(presentation, 'render', (screen, fallback, values) =>
     screen === 'welcome' ? artwork : render(screen, fallback, values));

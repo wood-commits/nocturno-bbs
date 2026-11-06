@@ -7,12 +7,18 @@ import { resolve, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { Store } from '../src/store.js';
-import { createBbs } from '../src/server.js';
+import { fileURLToPath } from 'node:url';
+import { createBbs as startBbs } from '../src/server.js';
 import { hashPassword } from '../src/auth.js';
 import { Transfers } from '../src/transfers.js';
 import { ZTransfer } from '../src/transfer-zmodem.js';
 import { QWK_ID, qwkMessage, zip, unzip } from '../src/transfer-qwk.js';
 import { Presentation } from '../src/presentation.js';
+
+// Never load the operator's private, Git-ignored ansi/ directory: its artwork
+// can be large and is paced at 28.8k, making results machine-dependent.
+const samples = fileURLToPath(new URL('../examples/ansi', import.meta.url));
+const createBbs = options => startBbs({ ansiDirectory: samples, ...options });
 
 function telnetBytes(bytes) {
   const out = [];
@@ -99,7 +105,7 @@ test('real telnet file and QWK transfers preserve binary bytes, permissions, men
     rmSync(directory, { recursive: true, force: true });
   });
   client = await connect(Number(bbs.endpoints[0].split(':').at(-1)));
-  const form = new Presentation();
+  const form = new Presentation(samples);
   await client.wait('Selection:');
   client.clear(); client.send('L');
   await client.wait(form.position('login', '|{LOGINHANDLE}') ?? 'Handle (');

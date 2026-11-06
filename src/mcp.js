@@ -1,7 +1,8 @@
 import net from 'node:net';
 import { pathToFileURL } from 'node:url';
 import { readJson, writeJson, outputLimit } from './mcp-transport.js';
-import { validateMcpOptions } from './mcp-server.js';
+import { randomBytes } from 'node:crypto';
+import { validateMcpOptions, mcpProof, proofMatches } from './mcp-server.js';
 
 export function connectMcp({ endpoint, token, input = process.stdin, output = process.stdout, onError }) {
   validateMcpOptions({ endpoint, token });
@@ -20,16 +21,25 @@ export function connectMcp({ endpoint, token, input = process.stdin, output = pr
     socket.destroy();
   };
   const fail = error => { if (!stopped) { stop(); onError(error); } };
-  socket.once('connect', () => {
-    try { writeJson(socket, { token }); } catch (error) { fail(error); }
-  });
+  // Never send the token itself: the endpoint may be squatted by another local process.
+  const client = randomBytes(32).toString('hex');
+  let challenge;
   socket.on('error', fail);
   socket.once('close', () => {
     if (!stopped) fail(new Error('MCP bridge disconnected.'));
   });
   readJson(socket, message => {
-    if (!ready) {
-      if (!message || message.ready !== true) throw new Error('MCP authentication failed.');
+    if (challenge === undefined) {
+      if (!message || typeof message.challenge !== 'string' || !/^[a-f0-9]{64}$/.test(message.challenge)) {
+        throw new Error('MCP authentication failed.');
+      }
+      challenge = message.challenge;
+      writeJson(socket, { client, proof: mcpProof(token, 'client', challenge, client) });
+    } else if (!ready) {
+      if (!message || message.ready !== true ||
+        !proofMatches(mcpProof(token, 'server', challenge, client), message.proof)) {
+        throw new Error('MCP authentication failed.');
+      }
       ready = true;
       clearTimeout(timer);
       detachInput = readJson(input, value => writeJson(socket, value), fail);

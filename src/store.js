@@ -11,6 +11,8 @@ import { Limits } from './limits.js';
 import { migrateMci } from './mci.js';
 import { STRING_SOURCE_LIMIT } from './strings.js';
 
+export const PENDING_APPLICATION_LIMIT = 100;
+
 export class Store {
   constructor(filename) {
     if (filename !== ':memory:') {
@@ -268,6 +270,9 @@ export class Store {
       throw new InputError('Registration is full. Contact the sysop.');
     }
     if (this.findUser(handle)) throw new InputError('Unable to register that handle.');
+    // Anonymous applications must not consume the permanent account cap faster than review.
+    if (pending && this.db.prepare("SELECT count(*) AS n FROM users WHERE application_status = 'pending' AND deleted = 0")
+      .get().n >= PENDING_APPLICATION_LIMIT) throw new InputError('error_application_queue_full');
     return this.db.prepare(
       'INSERT INTO users(handle, password_hash, created_at, application_status) VALUES (?, ?, ?, ?)'
     ).run(handle, hash, new Date().toISOString(), pending ? 'pending' : 'approved').lastInsertRowid;

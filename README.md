@@ -92,6 +92,8 @@ Saved display-string overrides retain their own colors; reset an entry to adopt
 the stock palette.
 Choose `N` to apply, `C` to check an application, or `L` to log on.
 New applications require local sysop approval; existing accounts stay approved.
+At most 100 applications may await review at once; further applications are
+refused until the sysop approves or rejects some.
 Application checks require the handle and password and do not log the applicant in.
 Password errors and application notices redraw the login menu with one selection
 prompt. With artwork, notices temporarily replace the warning on row 23, keeping
@@ -274,6 +276,13 @@ Anyone holding the token can operate user terminals and, with
 data, account approval, permissions, moderation, watching/chat and shutdown.
 This explicitly extends local-TTY trust to authenticated local automation.
 Treat the agent and its MCP client as trusted operators, not untrusted callers.
+
+The token never crosses the IPC connection. The BBS sends a random challenge;
+the bridge answers with its own nonce and an HMAC-SHA256 proof keyed by the
+token, and the BBS replies with a separate proof before the bridge forwards any
+MCP traffic. A process squatting the endpoint therefore cannot learn the token
+or receive tool calls (such as caller passwords). Custom IPC clients must follow
+the same handshake; sending `{ "token": ... }` is rejected.
 
 VS Code workspace configuration is included in [`.vscode/mcp.json`](.vscode/mcp.json).
 After starting the BBS with the environment above, run **MCP: List Servers**,
@@ -590,7 +599,9 @@ Enter. `?` immediately displays this list in the BBS.
 - **B:** `A` adds a BBS name (40 characters) and address (100).
 - **I:** `A` adds a 120-character oneliner. BBS/oneliner lists use `N/P`.
 - **S:** Enter a private sysop note; `.` saves. Guest notes are also available
-  from the login matrix, once per connection.
+  from the login matrix, once per connection and three per address (IPv6 /64)
+  per hour. Guest notes may use at most 1,000 of the 10,000 notification slots,
+  so anonymous callers cannot exhaust member notes and pages.
 - **P:** Enter a page reason (160 characters). This creates a private local
   notification, not an automatic chat connection. At WFC the sysop uses **R**
   to read/acknowledge requests, or **N**, **W ID**, **C** to start live chat
@@ -629,7 +640,9 @@ Filenames are metadata, never client-selected host paths. Files are never execut
 
 Files are limited to **4 MiB each**, **64 MiB total live payload**, and
 **1,000 retained catalog IDs**. Removing a file clears its payload and metadata
-but reserves its ID. There are at most four simultaneous transfers, with
+but reserves its ID. Each caller may have at most **five uploads awaiting
+approval**; further uploads are refused before any bytes are transferred until
+the sysop approves or removes some, so one account cannot fill shared storage. There are at most four simultaneous transfers, with
 120-second absolute and 30-second idle deadlines. Raw uploads use a bounded
 128 KiB burst and approximately 256 KB/s socket backpressure; ordinary caller
 input retains its original limits.
@@ -972,15 +985,18 @@ proxy, or reuse credentials from other systems.
   submissions per session. Limits are process-local and reset on restart.
 - 32 concurrent sockets, three per IP (shared across telnet/TLS), and 30 new
   connections per IP per minute. TLS handshakes have a 10-second timeout.
-  IPs behind a shared NAT/SSH tunnel share these limits.
+  IPs behind a shared NAT/SSH tunnel share these limits. Per-address limits
+  treat an IPv6 caller's whole /64 as one address (and IPv4-mapped IPv6 as
+  plain IPv4), so rotating addresses within a subscriber prefix does not
+  bypass connection, authentication or guest-note quotas.
 - Default five-minute idle timeout and 60-minute session lifetime, configurable
   for new connections from the local sysop console. Input is limited to
   160 characters per line, 16 queued commands, 16 KiB burst / 8 KB/s sustained,
   1 KiB subnegotiation, and 128 telnet option negotiations per session.
   Slow output readers are disconnected at the bounded output-buffer threshold.
 - Message subject: 60 characters; body: 50 lines / 4096 characters.
-  Posting interval: 10 seconds per session. Storage caps: 10,000 users and
-  100,000 messages. Last-call history retains approximately 1,000 calls
+  Posting interval: 10 seconds per session. Storage caps: 10,000 users
+  (at most 100 pending applications) and 100,000 messages. Last-call history retains approximately 1,000 calls
   (active calls are not pruned).
 - SQL parameters, printable-text validation, and rendering sanitization prevent
   callers from injecting SQL or ANSI/OSC terminal commands. Only application
@@ -1034,6 +1050,11 @@ certificate paths and isolated test cleanup. This is a lightweight SAST
 baseline, not proof of vulnerability absence.
 
 Tests use Node's native runner and real ephemeral sockets/SQLite databases.
+Server and presentation fixtures explicitly load the bundled `examples/ansi`
+samples, never your private `ansi/` directory, so results do not depend on local
+artwork (large private welcome art would also be paced at 28.8k on every test
+login). If a run seems stuck, `node --test --test-timeout=60000` turns a hang into
+a reported failure.
 Bundled-artwork checks cover rendered cells, colors and footer bounds rather
 than fixed banner wording. Narrow-field fixtures separately cover overflowing
 message headers; bundled mail pagination uses the sample header's field widths.

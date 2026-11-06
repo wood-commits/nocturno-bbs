@@ -10,13 +10,19 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 import { Store } from '../src/store.js';
-import { createBbs } from '../src/server.js';
-import { startMcpServer } from '../src/mcp-server.js';
+import { createBbs as startBbs } from '../src/server.js';
+import { startMcpServer, mcpProof } from '../src/mcp-server.js';
+import { connectMcp } from '../src/mcp.js';
 import { readJson, writeJson, outputLimit } from '../src/mcp-transport.js';
 import { McpTerminal } from '../src/mcp-terminal.js';
 import { config } from '../src/config.js';
 import { ZTransfer } from '../src/transfer-zmodem.js';
 import { unzip } from '../src/transfer-qwk.js';
+
+// Never load the operator's private, Git-ignored ansi/ directory: its artwork
+// can be large and is paced at 28.8k, making results machine-dependent.
+const samples = fileURLToPath(new URL('../examples/ansi', import.meta.url));
+const createBbs = options => startBbs({ ansiDirectory: samples, ...options });
 
 const password = 'unique MCP test password';
 
@@ -49,8 +55,11 @@ async function client(t, f) {
       await delay(5);
     }
   };
-  writeJson(socket, { token: f.token });
-  assert.deepEqual(await take(value => value.ready), { ready: true });
+  const { challenge } = await take(value => value.challenge);
+  const nonce = randomBytes(32).toString('hex');
+  writeJson(socket, { client: nonce, proof: mcpProof(f.token, 'client', challenge, nonce) });
+  const ready = await take(value => value.ready);
+  assert.deepEqual(ready, { ready: true, proof: mcpProof(f.token, 'server', challenge, nonce) });
   let nextId = 0;
   const rpc = async (method, params) => {
     const id = ++nextId;
@@ -101,9 +110,22 @@ test('JSON framing handles fragmentation, multiple messages, malformed/oversized
 test('IPC rejects invalid authentication and implements MCP lifecycle, discovery and validation', async t => {
   const f = await fixture(t, false);
   const rejected = net.connect(f.endpoint);
+  // Drain the server's challenge; unread data would otherwise delay 'end'/'close' forever.
+  rejected.resume();
   await once(rejected, 'connect');
-  writeJson(rejected, { token: '0'.repeat(64) });
+  // The raw token is no longer an accepted credential, and a wrong proof is refused.
+  writeJson(rejected, { token: f.token });
   await once(rejected, 'close');
+  const forged = net.connect(f.endpoint);
+  const challenges = [];
+  readJson(forged, value => challenges.push(value), () => {});
+  await once(forged, 'connect');
+  while (!challenges.length) await delay(5);
+  assert.ok(!JSON.stringify(challenges).includes(f.token));
+  const nonce = randomBytes(32).toString('hex');
+  writeJson(forged, { client: nonce, proof: mcpProof('0'.repeat(64), 'client', challenges[0].challenge, nonce) });
+  await once(forged, 'close');
+  assert.equal(challenges.length, 1);
   const c = await client(t, f);
   const listed = await c.rpc('tools/list');
   assert.equal(listed.result.tools.length, 4);
@@ -272,6 +294,31 @@ test('MCP sysop terminal idle timeout closes it without quitting the BBS', async
   assert.equal(terminal.closed, true);
   assert.match(terminal.reason, /Idle timeout/);
   assert.equal(terminal.adapter.controller.stopped, true);
+});
+
+test('MCP bridge never discloses its token to an endpoint impostor', async t => {
+  const endpoint = process.platform === 'win32'
+    ? `\\\\.\\pipe\\nocturno-squat-${randomUUID()}` : join(tmpdir(), `nocturno-squat-${randomUUID()}.sock`);
+  const token = randomBytes(32).toString('hex');
+  const received = [];
+  const impostor = net.createServer(socket => {
+    readJson(socket, value => received.push(value), () => {});
+    writeJson(socket, { challenge: randomBytes(32).toString('hex') });
+    socket.once('data', () => writeJson(socket, { ready: true, proof: '0'.repeat(64) }));
+  });
+  await new Promise(resolve => impostor.listen(endpoint, resolve));
+  t.after(() => new Promise(resolve => impostor.close(resolve)));
+  const input = new PassThrough(), output = new PassThrough();
+  const forwarded = [];
+  output.on('data', data => forwarded.push(data));
+  const failed = new Promise(resolve => connectMcp({ endpoint, token, input, output, onError: resolve }));
+  assert.match((await failed).message, /authentication failed/);
+  input.write('{"jsonrpc":"2.0","id":1,"method":"ping"}\n');
+  await delay(20);
+  assert.equal(received.length, 1);
+  assert.ok(!JSON.stringify(received).includes(token));
+  assert.deepEqual(Object.keys(received[0]).sort(), ['client', 'proof']);
+  assert.equal(forwarded.length, 0);
 });
 
 test('stdio MCP executable connects to running BBS and emits only protocol JSON', async t => {

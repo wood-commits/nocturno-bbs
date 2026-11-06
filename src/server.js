@@ -1,6 +1,6 @@
 import net from 'node:net';
 import tls from 'node:tls';
-import { Auth, AttemptLimiter } from './auth.js';
+import { Auth, AttemptLimiter, addressKey } from './auth.js';
 import { Session } from './session.js';
 import { InputError } from './validation.js';
 import { Presentation } from './presentation.js';
@@ -34,8 +34,9 @@ export async function createBbs({ store, name = 'Nocturno BBS', port = 2323,
     return session;
   };
   const track = socket => {
-    const sameAddress = [...pending].filter(peer => peer.remoteAddress === socket.remoteAddress).length;
-    if (stopping || pending.size >= 32 || sameAddress >= 3 || !connections.take(socket.remoteAddress)) {
+    const key = addressKey(socket.remoteAddress);
+    const sameAddress = [...pending].filter(peer => addressKey(peer.remoteAddress) === key).length;
+    if (stopping || pending.size >= 32 || sameAddress >= 3 || !connections.take(key)) {
       socket.destroy();
       return;
     }

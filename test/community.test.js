@@ -1,16 +1,20 @@
+import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, rmSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { Store } from '../src/store.js';
-import { Community, initializeCommunity } from '../src/community.js';
+import { Community, initializeCommunity, GUEST_NOTE_CAPACITY, GUEST_NOTES_PER_HOUR } from '../src/community.js';
 import { InputError } from '../src/validation.js';
 import { Presentation } from '../src/presentation.js';
 import { plainText, ui } from '../src/strings.js';
 import { LocalTerminal } from '../src/local-terminal.js';
 import { TelnetInput } from '../src/telnet.js';
 import { terminal } from './helpers/ansi-terminal.js';
+
+// Bundled samples only; the private ansi/ directory is machine-specific.
+const samples = fileURLToPath(new URL('../examples/ansi', import.meta.url));
 
 function setup(t, filename = ':memory:') {
   const store = new Store(filename);
@@ -61,7 +65,7 @@ for (const artwork of [false, true]) {
   test(`stats ${artwork ? 'artwork' : 'rendered fallback'} leaves the cursor after the command prompt`, async t => {
     const { store, community, alice } = setup(t);
     const caller = session(store, alice);
-    caller.presentation = new Presentation();
+    caller.presentation = new Presentation(samples);
     caller.presentation.templates.clear();
     if (artwork) caller.presentation.templates.set('stats', 'STATS\r\n');
     caller.view = values => ({ values });
@@ -461,7 +465,7 @@ test('stats and email headers use trusted presentation templates with generated 
   const caller = session(store, bob);
   const rendered = [];
   caller.transfers = { stats: () => ({ uploads: 2, downloads: 3 }) };
-  caller.presentation = new Presentation();
+  caller.presentation = new Presentation(samples);
   const render = caller.presentation.render.bind(caller.presentation);
   caller.view = values => ({ store, presentation: caller.presentation, values });
   caller.presentation.render = (key, fallback, values) => {
@@ -532,4 +536,17 @@ test('caller stats note is self-owned and never reveals or edits the private sys
   await community.handle(caller, 'Updated own display note');
   assert.equal(community.stats(alice).user_note, 'Updated own display note');
   assert.equal(community.stats(bob).user_note, 'Bob owns this');
+});
+test('anonymous guest notes are rate limited per address and cannot exhaust member capacity', t => {
+  const { store, community, alice } = setup(t);
+  const guest = (node, remoteAddress) => Object.assign(session(store, undefined, node), { socket: { remoteAddress } });
+  for (let node = 1; node <= GUEST_NOTES_PER_HOUR; node++) community.notify(guest(node, `2001:db8:5:6::${node}`), 'note', 'Hello');
+  // Rotating within one IPv6 /64 or reconnecting does not grant new guest notes.
+  assert.throws(() => community.notify(guest(90, '2001:db8:5:6::99'), 'note', 'Flood'), /temporarily limited/);
+  assert.ok(community.notify(guest(91, '198.51.100.7'), 'note', 'Different caller'));
+  store.db.prepare(`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ?)
+    INSERT INTO community_notifications(kind, user_id, node, body, created_at)
+    SELECT 'note', NULL, 1, 'old guest note', '2026-01-01' FROM n`).run(GUEST_NOTE_CAPACITY);
+  assert.throws(() => community.notify(guest(92, '192.0.2.44'), 'note', 'Full'), /temporarily limited/);
+  assert.ok(community.notify(session(store, alice, 3), 'note', 'Members keep their capacity'));
 });
