@@ -313,7 +313,7 @@ function uptimeText(uptime) {
   return `${days ? `${days}d ` : ''}${two(hours)}:${two(minutes)}:${two(seconds)}`;
 }
 
-export function waitingScreen(name, stats, nodes, endpoints, uptime, store, rows = SYSOP_SCREEN_ROWS) {
+export function waitingScreen(name, stats, nodes, endpoints, uptime, store, rows = SYSOP_SCREEN_ROWS, remote = false) {
   const line = (key, values) => `${cell(ui(store, key, values), LAST_COLUMN)}\r\n`;
   const band = (row, key, values) => `\x1b[${row};1H${ansi.selected}${' '.repeat(SCREEN_COLUMNS)}` +
     `\x1b[${row};1H${ui(store, key, values).slice(0, LAST_COLUMN)}${ansi.reset}`;
@@ -331,7 +331,7 @@ export function waitingScreen(name, stats, nodes, endpoints, uptime, store, rows
     band(2, 'wfc_uptime', { DATE: date(new Date().toISOString()), SECONDS: Math.floor(uptime), UPTIME: uptimeText(uptime) }) +
     `\x1b[3;1H${sysopRule}\r\n` +
     line('wfc_statistics', { USERS: stats.users, POSTS: stats.messages, CALLS: stats.calls, TODAY: stats.today }) +
-    line('wfc_active', { COUNT: nodes.length }) +
+    line(remote ? 'wfc_active_remote' : 'wfc_active', { COUNT: nodes.length }) +
     line('wfc_listeners') +
     endpoints.map(endpoint => `  ${cell(endpoint, LAST_COLUMN - 2)}\r\n`).join('') +
     line('wfc_nodes') +

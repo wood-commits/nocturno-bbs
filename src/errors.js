@@ -6,13 +6,15 @@ const startupStages = new Map([
   ['database', 'opening the SQLite database'],
   ['services', 'initializing BBS artwork, authentication and listeners'],
   ['mcp', 'starting the local MCP service'],
+  ['remote-console', 'starting the remote sysop console socket'],
   ['console', 'starting the local sysop console']
 ]);
 const startupHints = new Map([
-  ['configuration', 'Check BBS_NAME, BBS_PORT, BBS_TLS_* and BBS_MCP_* settings.'],
+  ['configuration', 'Check BBS_NAME, BBS_PORT, BBS_TLS_*, BBS_MCP_* and BBS_CONSOLE_* settings.'],
   ['database', 'Check BBS_DATA_DIR permissions, available disk space and database integrity. Do not run two owners of the same database.'],
   ['services', 'Check artwork against ANSI.md and listener settings against README troubleshooting.'],
   ['mcp', 'Check the local IPC endpoint, permissions and whether another MCP service owns it.'],
+  ['remote-console', 'Check BBS_CONSOLE_SOCKET, its directory permissions and whether another BBS owns it.'],
   ['console', 'Use an interactive terminal, or set BBS_DASHBOARD=0 to run without the local console.']
 ]);
 const knownStartupReasons = new Map([
@@ -21,6 +23,8 @@ const knownStartupReasons = new Map([
   ['BBS_MCP_SYSOP must be 0 or 1.', 'BBS_MCP_SYSOP must be 0 or 1.'],
   ['BBS_MCP_TOKEN must be 64 hexadecimal characters generated randomly.', 'BBS_MCP_TOKEN must contain 64 randomly generated hexadecimal characters. The token is not logged.'],
   ['MCP requires a local IPC endpoint.', 'BBS_MCP_ENDPOINT must be a valid local IPC endpoint, not a network address.'],
+  ['BBS_CONSOLE_TOKEN must be 64 hexadecimal characters generated randomly.', 'BBS_CONSOLE_TOKEN must contain 64 randomly generated hexadecimal characters. The token is not logged.'],
+  ['The sysop console requires a local IPC endpoint.', 'BBS_CONSOLE_SOCKET must be an absolute Unix socket path (or Windows named pipe), not a network address.'],
   ['Invalid MCP sysop flag.', 'The MCP sysop flag must be a boolean.'],
   ['The local ansi path must be a directory.', 'The local ansi path exists but is not a directory.'],
   ['Saved display string exceeds the MCI source limit after migration.',

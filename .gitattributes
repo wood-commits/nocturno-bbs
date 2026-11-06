@@ -1,2 +1,3 @@
 * text=auto
 *.ans -text
+Dockerfile text eol=lf

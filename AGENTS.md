@@ -11,8 +11,8 @@ Use the project skill at `.github/skills/bbs-development/SKILL.md` for BBS work.
   Bare LF moves down without returning to column one in telnet terminals.
 - Preserve bounded parsers, queues, connections, password work and output.
 - All message-board routes require an authenticated caller. SQL uses parameters.
-- Sysop commands are local-TTY or explicitly enabled authenticated local MCP
-  only. Require confirmation for destructive menu actions; never add a telnet
+- Sysop commands are local-TTY, explicitly enabled authenticated local MCP, or
+  the opt-in authenticated local console socket (`kubectl exec`/`ssh -t`) only. Require confirmation for destructive menu actions; never add a telnet
   shortcut into the console controller. MCP callers still authenticate normally.
 - Saved SQLite settings override the initial environment BBS name. Apply
   registration/account changes even during asynchronous authentication; connection

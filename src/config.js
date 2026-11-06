@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { text } from './validation.js';
 import { validateMcpOptions } from './mcp-server.js';
+import { validateConsoleOptions } from './console-server.js';
 
 function port(value, fallback) {
   const number = value === undefined ? fallback : Number(value);
@@ -23,6 +24,11 @@ export function config(env = process.env) {
     mcp = { endpoint: env.BBS_MCP_ENDPOINT, token: env.BBS_MCP_TOKEN, sysop: env.BBS_MCP_SYSOP === '1' };
     validateMcpOptions(mcp);
   }
+  let remoteConsole;
+  if (env.BBS_CONSOLE_SOCKET !== undefined || env.BBS_CONSOLE_TOKEN !== undefined) {
+    remoteConsole = { endpoint: env.BBS_CONSOLE_SOCKET, token: env.BBS_CONSOLE_TOKEN };
+    validateConsoleOptions(remoteConsole);
+  }
   return {
     name: text(env.BBS_NAME ?? 'Nocturno BBS', 40, 'BBS name'),
     filename: resolve(env.BBS_DATA_DIR ?? 'data', 'bbs.sqlite'),
@@ -38,6 +44,7 @@ export function config(env = process.env) {
       key: readFileSync(env.BBS_TLS_KEY)
     } : undefined,
     dashboard: env.BBS_DASHBOARD !== '0',
-    mcp
+    mcp,
+    remoteConsole
   };
 }

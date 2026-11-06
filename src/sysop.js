@@ -55,7 +55,7 @@ export class SysopConsole {
     }
     let frame, prompt, requestNotice = '';
     if (this.view === 'wfc') {
-      frame = waitingScreen(settings.name, this.store.stats(), this.bbs.nodes(), this.bbs.endpoints, this.uptime(), this.store, rows);
+      frame = waitingScreen(settings.name, this.store.stats(), this.bbs.nodes(), this.bbs.endpoints, this.uptime(), this.store, rows, this.remote);
       const requests = this.bbs.community?.notifications(0) ?? [];
       if (requests.length) requestNotice = ui(this.store, 'sysop_value_sysop_requests_waiting_r_read_requests', { VALUE1: requests.length === 10 ? '10+' : requests.length });
       prompt = ui(this.store, 'screens_local_sysop_command');
@@ -694,15 +694,22 @@ export function startSysopConsole({ input = process.stdin, output = process.stdo
   if (!input.isTTY || !output.isTTY || typeof input.setRawMode !== 'function') {
     throw new Error('The local sysop console requires interactive input and output terminals.');
   }
-  return startConsole({ input, output, ...options }, true);
+  return startConsole({ input, output, ...options }, { interactive: true, refresh: true });
 }
 
 export function startSysopAutomation(options) {
-  return startConsole(options, false);
+  return startConsole(options, { interactive: false, refresh: false });
 }
 
-function startConsole({ input, output, ...options }, interactive) {
+// An attached remote console (see console-server.js): no raw TTY of its own, but the
+// dashboard refreshes and Ctrl+C detaches the operator instead of stopping the BBS.
+export function startSysopRemote({ onDetach, ...options }) {
+  return startConsole(options, { interactive: false, refresh: true, onDetach });
+}
+
+function startConsole({ input, output, ...options }, { interactive, refresh, onDetach }) {
   const controller = new SysopConsole({ ...options, output, onQuit: () => quit() });
+  controller.remote = Boolean(onDetach);
   const keyboard = new PassThrough();
   let buffer = '';
   let skipEnter = false;
@@ -734,13 +741,14 @@ function startConsole({ input, output, ...options }, interactive) {
     }
   };
   const quit = () => { stop(); options.onQuit(); };
+  const detach = () => { stop(); onDetach(); };
   const fail = error => {
     stop();
     options.onError(error);
     options.onQuit();
   };
   const dispatch = (value, key = {}) => {
-    if (key.ctrl && key.name === 'c') { quit(); return; }
+    if (key.ctrl && key.name === 'c') { if (onDetach) detach(); else quit(); return; }
     if (controller.terminalKey(value, key)) {
       buffer = '';
       skipEnter = false;
@@ -810,7 +818,7 @@ function startConsole({ input, output, ...options }, interactive) {
     controller.render();
   }
   catch (error) { stop(); throw error; }
-  if (interactive) timer = setInterval(() => {
+  if (refresh) timer = setInterval(() => {
     try {
       if (controller.view === 'wfc' && !controller.pending && !buffer) controller.render();
     } catch (error) { fail(error); }

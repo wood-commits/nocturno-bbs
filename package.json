@@ -9,6 +9,9 @@
   "scripts": {
     "start": "node src/index.js",
     "mcp": "node src/mcp.js",
+    "dev:up": "node deploy/podman/dev.js up",
+    "dev:status": "node deploy/podman/dev.js status",
+    "dev:down": "node deploy/podman/dev.js down",
     "test": "node --test",
     "test:coverage": "node --test --experimental-test-coverage",
     "lint": "eslint .",

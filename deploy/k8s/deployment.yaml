@@ -1,0 +1,105 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nocturno
+  labels:
+    app.kubernetes.io/name: nocturno
+spec:
+  # SQLite and the per-address limits are process-local: never scale past one.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: nocturno
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: nocturno
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: bbs
+          image: nocturno-bbs
+          ports:
+            - name: telnets
+              containerPort: 9923
+          env:
+            - name: BBS_DATA_DIR
+              value: /data
+            - name: BBS_TLS_HOST
+              value: 0.0.0.0
+            - name: BBS_TLS_CERT
+              value: /tls/tls.crt
+            - name: BBS_TLS_KEY
+              value: /tls/tls.key
+            - name: BBS_DASHBOARD
+              value: "0"
+            # Remote sysop console: kubectl exec -it deploy/nocturno -- node src/console.js
+            - name: BBS_CONSOLE_SOCKET
+              value: /run/nocturno/console.sock
+            - name: BBS_CONSOLE_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: nocturno-console
+                  key: token
+          # The probe authenticates to the console socket without attaching a console.
+          readinessProbe:
+            exec:
+              command: [node, src/console.js, --probe]
+            periodSeconds: 30
+            timeoutSeconds: 5
+          livenessProbe:
+            exec:
+              command: [node, src/console.js, --probe]
+            initialDelaySeconds: 15
+            periodSeconds: 60
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: tls
+              mountPath: /tls
+              readOnly: true
+            - name: run
+              mountPath: /run/nocturno
+            # Private artwork (optional). Create the ConfigMap first, then uncomment:
+            #   kubectl -n nocturno create configmap nocturno-ansi --from-file=ansi/
+            # - name: ansi
+            #   mountPath: /app/ansi
+            #   readOnly: true
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: nocturno-data
+        - name: tls
+          secret:
+            secretName: nocturno-tls
+            defaultMode: 0440
+        - name: run
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Mi
+        # - name: ansi
+        #   configMap:
+        #     name: nocturno-ansi

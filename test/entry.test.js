@@ -15,7 +15,8 @@ import { Store } from '../src/store.js';
 import { Presentation } from '../src/presentation.js';
 
 const entry = fileURLToPath(new URL('../src/index.js', import.meta.url));
-const noMcp = { BBS_MCP_ENDPOINT: undefined, BBS_MCP_TOKEN: undefined, BBS_MCP_SYSOP: undefined };
+const noMcp = { BBS_MCP_ENDPOINT: undefined, BBS_MCP_TOKEN: undefined, BBS_MCP_SYSOP: undefined,
+  BBS_CONSOLE_SOCKET: undefined, BBS_CONSOLE_TOKEN: undefined };
 
 test('clean checkout creates its default database, loads samples and serves telnet and opt-in local MCP', { timeout: 10000 }, async t => {
   const directory = mkdtempSync(join(tmpdir(), 'nocturno-entry-'));

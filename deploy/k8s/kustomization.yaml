@@ -1,0 +1,15 @@
+# kubectl apply -k deploy/k8s
+# Create the nocturno-tls and nocturno-console Secrets first (see README "Kubernetes").
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: nocturno
+resources:
+  - namespace.yaml
+  - pvc.yaml
+  - deployment.yaml
+  - service.yaml
+  - rbac.yaml
+images:
+  - name: nocturno-bbs
+    newName: registry.example.com/nocturno-bbs # replace with your registry
+    newTag: latest # prefer an immutable tag or digest
