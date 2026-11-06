@@ -36,7 +36,9 @@ function quietly(args) {
 
 function credentials() {
   mkdirSync(dev, { recursive: true });
-  if (!existsSync(file.token)) writeFileSync(file.token, randomBytes(32).toString('hex'), { mode: 0o600 });
+  // Exclusive create: keep an existing token without a separate existence check.
+  try { writeFileSync(file.token, randomBytes(32).toString('hex'), { mode: 0o600, flag: 'wx' }); }
+  catch (error) { if (error.code !== 'EEXIST') throw error; }
   if (!existsSync(file.tlsCert) || !existsSync(file.tlsKey)) {
     const args = ['req', '-x509', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:P-256', '-nodes',
       '-days', '365', '-subj', '/CN=localhost', '-addext', 'subjectAltName=DNS:localhost,IP:127.0.0.1',
