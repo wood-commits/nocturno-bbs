@@ -182,8 +182,9 @@ There are no default users, administrator passwords, shell doors, or telnet syso
 commands. An optional authenticated local MCP bridge can delegate console authority
 to agents (see below). Authenticated users may read other users' handles, but message/file
 access depends on their assigned role. Public lists never contain password hashes,
-private profiles or IP addresses. The dashboard is local to the server terminal
-or an explicitly enabled local MCP sysop session.
+private profiles or IP addresses. The dashboard is local to the server terminal,
+an explicitly enabled local MCP sysop session, or the opt-in
+[remote sysop console](#remote-sysop-console) attached through a local socket.
 Existing and new users receive the **Member** role, preserving existing access,
 including posting and doors. Per-user posting/door restrictions remain additional
 restrictions; a role never overrides them or grants remote sysop privileges.
@@ -388,6 +389,60 @@ limits at creation; polling does not extend terminal idle time. User terminals
 count toward the same 32 BBS sessions and share loopback authentication quotas.
 Disconnecting a bridge closes all its terminals, disconnects its owned callers,
 and ends watching/chat without hanging up other callers.
+
+### Remote sysop console
+
+When the BBS runs where nobody sits at its terminal (a VPS, a container or a
+Kubernetes pod), attach the **same** WFC console from a shell on that host.
+There is still no network sysop listener: the console is a local Unix socket
+(or Windows named pipe) with the same mutual HMAC-SHA256 challenge-response as
+MCP, so the token never crosses the connection. Reaching the socket requires a
+shell on the BBS host, which `ssh` or Kubernetes `pods/exec` permission
+already gates; the token is a second check.
+
+Enable it with a fresh token and a private socket path, then start the BBS:
+
+```bash
+export BBS_CONSOLE_TOKEN="$(node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))")"
+export BBS_CONSOLE_SOCKET=/run/nocturno/console.sock
+npm start
+```
+
+Attach from any shell on that host that has the same two variables:
+
+```bash
+node src/console.js
+```
+
+```bash
+ssh -t your-server 'cd /opt/nocturno && node src/console.js'
+```
+
+```bash
+kubectl -n nocturno exec -it deploy/nocturno -- node src/console.js
+```
+
+`kubectl exec` inherits the pod's environment, so the token from the Secret is
+already present. The console behaves like the local one: immediate shortcuts,
+Enter for fields, YES for every destructive action, node watching and chat.
+**Ctrl+C detaches** and leaves the BBS running; **Ctrl+]** detaches locally even if
+the BBS stops answering. WFC **Q** followed by **YES** still shuts the BBS down; under
+Kubernetes the pod then restarts. Use `kubectl rollout restart` or scale the
+Deployment for planned restarts instead.
+
+`node src/console.js --probe` authenticates and exits 0 without opening a console.
+The Kubernetes manifests use it as their readiness/liveness check.
+
+Limits: one attached console at a time (independent of the physical console and
+the MCP sysop terminal), four socket connections, five-second authentication,
+4,096-character input frames chunked by the client, 200-message burst /
+100 messages per second, and a 1 MiB output buffer. A client that stops reading
+is disconnected. The console captures the configured caller idle timeout when it
+attaches; idle consoles are detached. The socket is created with mode `0600`.
+If a crashed BBS left a socket file owned by the same account and nothing answers
+on it, the file is replaced at startup. A live endpoint, a non-socket, or a file
+owned by anyone else is never removed. Do not reuse the MCP token; proofs are
+domain-separated, but separate tokens can be rotated independently.
 
 ### Watching callers, live chat and local login
 
@@ -780,6 +835,8 @@ Environment variables (PowerShell example: `$env:BBS_PORT = '2323'`):
 | `BBS_MCP_ENDPOINT` | unset | Opt-in local named pipe / absolute Unix socket; requires token |
 | `BBS_MCP_TOKEN` | unset | Random 64-hex-character shared IPC token; never log/commit it |
 | `BBS_MCP_SYSOP` | `0` | Set `1` to delegate local sysop authority to authenticated MCP clients |
+| `BBS_CONSOLE_SOCKET` | unset | Opt-in remote sysop console socket (absolute Unix path / named pipe); requires token |
+| `BBS_CONSOLE_TOKEN` | unset | Random 64-hex-character console token; never log/commit it |
 | `BBS_TLS_CERT` | unset | PEM certificate chain path |
 | `BBS_TLS_KEY` | unset | PEM private key path |
 | `BBS_TLS_HOST` | `127.0.0.1` | TLS bind address; explicitly opt into public access |
@@ -1025,6 +1082,96 @@ Telnet/BBS client -> your loopback port 12323 -> encrypted SSH tunnel
 Do not forward its port publicly, place it behind an unauthenticated public
 proxy, or reuse credentials from other systems.
 
+## Deploying with Docker and Kubernetes
+
+The included [`Dockerfile`](Dockerfile) builds a small image from `node:24-slim`.
+There are no runtime dependencies, so it copies only `package.json`, `src/` and
+`examples/`. It runs as the unprivileged `node` user (UID 1000), stores data in
+`/data`, binds TLS to `0.0.0.0:9923` and disables the TTY dashboard. Plaintext
+telnet stays on the container's loopback, so **only the TLS listener is reachable
+from outside**. Callers need a TLS-capable client or stunnel.
+
+```bash
+docker build -t nocturno-bbs .
+```
+
+```bash
+docker run -d --name nocturno -p 9923:9923 -v nocturno-data:/data -v /etc/nocturno/tls:/tls:ro -e BBS_TLS_CERT=/tls/tls.crt -e BBS_TLS_KEY=/tls/tls.key -e BBS_CONSOLE_SOCKET=/run/nocturno/console.sock -e BBS_CONSOLE_TOKEN nocturno-bbs
+```
+
+```bash
+docker exec -it nocturno node src/console.js
+```
+
+### Local test container (Podman)
+
+To try the container locally, use `npm run dev:up`. It builds the image, generates
+a console token and a self-signed `localhost` certificate in the Git-ignored
+`.dev/` directory (using `openssl`, found on PATH or in Git for Windows), stores them as
+Podman secrets, and runs the container with the same hardening as the Kubernetes
+manifest: read-only root, all capabilities dropped, no new privileges, an in-memory
+console directory and a `nocturno-dev-data` volume. Only `127.0.0.1:9923` is published.
+
+```bash
+npm run dev:up
+```
+
+Then connect a TLS-capable BBS client (or stunnel with `CAfile = .dev/tls.crt`) to
+`localhost:9923`, and attach the sysop console the same way `kubectl exec` would:
+
+```bash
+podman exec -it nocturno-dev node src/console.js
+```
+
+`npm run dev:status` repeats these commands and `npm run dev:down` removes the
+container and secrets but keeps the data volume. `node deploy/podman/dev.js purge`
+also deletes the volume and `.dev/`. On Windows, create and start a Podman machine
+first (`podman machine init`, `podman machine start`).
+
+### Kubernetes
+
+Example manifests live in [`deploy/k8s`](deploy/k8s). Push the image, set its name in
+`kustomization.yaml`, create the two Secrets and apply:
+
+```bash
+kubectl create namespace nocturno
+```
+
+```bash
+kubectl -n nocturno create secret tls nocturno-tls --cert=fullchain.pem --key=privkey.pem
+```
+
+```bash
+kubectl -n nocturno create secret generic nocturno-console --from-literal=token="$(node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))")"
+```
+
+```bash
+kubectl apply -k deploy/k8s
+```
+
+Deployment notes:
+
+- **One replica, `Recreate` strategy, ReadWriteOnce volume.** SQLite and all
+  per-address limits are process-local. Never run two pods against one database.
+- **`externalTrafficPolicy: Local` is required.** Otherwise the load balancer
+  rewrites caller addresses to node IPs, and every caller shares the
+  three-connections-per-IP and login limits.
+- **Remote administration is `kubectl exec`.** The `nocturno-sysop` Role in
+  `rbac.yaml` grants `pods/exec`; bind it only to sysops, since it carries full
+  console authority.
+- **Certificates load at startup.** After cert-manager or manual renewal, run
+  `kubectl -n nocturno rollout restart deploy/nocturno`.
+- **Probes use `node src/console.js --probe`**, not TCP checks. TCP probes would
+  consume per-IP connection quota and log failed TLS handshakes.
+- **Private artwork** goes in a ConfigMap mounted at `/app/ansi` (see the
+  comments in `deployment.yaml`). `kubectl create configmap --from-file=ansi/`
+  stores CP437 files as binary data. ConfigMaps are limited to 1 MiB.
+- **Backups:** stop the BBS (`kubectl scale --replicas=0`) and snapshot the volume,
+  which holds both `bbs.sqlite` and the `files` payloads, then scale back to 1.
+- Security context: non-root, read-only root filesystem, all capabilities dropped,
+  no service-account token, `RuntimeDefault` seccomp. The console socket lives on
+  a memory-backed `emptyDir`.
+
 ## Security model and limits
 
 - Passwords use asynchronous scrypt (`N=32768, r=8, p=3`), 128-bit random salts,
@@ -1166,6 +1313,10 @@ caller errors retain code-only logging.
 - `src/transfers.js`, `src/transfer-zmodem.js`, `src/transfer-qwk.js`: approved
   file catalog, bounded binary transfers and offline public-mail packets.
 - `src/sysop.js`: local-only menu controller and bounded raw-TTY keyboard adapter.
+- `src/console.js`, `src/console-server.js`: remote sysop console client and its
+  authenticated local socket server.
+- `Dockerfile`, `deploy/k8s/`, `deploy/podman/dev.js`: container image, example Kubernetes
+  manifests and the local Podman test container.
 - `src/mcp.js`, `src/mcp-server.js`: stdio MCP bridge and authenticated local IPC
   server; `src/mcp-terminal.js`, `src/mcp-transport.js`: bounded terminal sessions
   and JSON framing.

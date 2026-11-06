@@ -1,0 +1,29 @@
+# Exec into the BBS pod is sysop authority: grant it only to trusted operators.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: nocturno-sysop
+rules:
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list]
+  - apiGroups: ["apps"]
+    resources: [deployments]
+    verbs: [get]
+  - apiGroups: [""]
+    resources: [pods/exec]
+    verbs: [create]
+---
+# Bind it to your sysop identities, for example:
+# apiVersion: rbac.authorization.k8s.io/v1
+# kind: RoleBinding
+# metadata:
+#   name: nocturno-sysops
+# roleRef:
+#   apiGroup: rbac.authorization.k8s.io
+#   kind: Role
+#   name: nocturno-sysop
+# subjects:
+#   - apiGroup: rbac.authorization.k8s.io
+#     kind: User
+#     name: sysop@example.com

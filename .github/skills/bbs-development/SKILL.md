@@ -10,7 +10,8 @@ description: "Build, debug, test or extend Nocturno BBS. Use for Node.js telnet/
 Read the root README.md and AGENTS.md. This is a single-process Node.js 24.13+
 ESM application with no runtime packages. Message and file bases use role-based
 access controls. There is no telnet/remote-account sysop privilege. Opt-in local
-MCP automation can explicitly receive local console authority.
+MCP automation can explicitly receive local console authority, and an opt-in local
+console socket lets operators with a shell on the host attach the WFC console.
 
 Follow the byte-to-screen path:
 
@@ -85,6 +86,27 @@ Follow the byte-to-screen path:
       queued input (16 / 128 KiB), requests (60 burst / 10 per second), unread
       terminal output (128 KiB), sends (8192 bytes), and transport output (1 MiB).
       Capture terminal idle/lifetime settings; reads must not keep callers alive.
+16. `src/console-server.js` owns the opt-in remote sysop console socket
+      (BBS_CONSOLE_SOCKET/BBS_CONSOLE_TOKEN); `src/console.js` is the raw-TTY client
+      operators run via `kubectl exec -it` or `ssh -t`. It reuses the MCP mutual HMAC
+      handshake with distinct console-client/console-server proof roles, then
+      newline JSON: client {input}/{resize}, server {output}/{notice}. It drives
+      sysop.js startSysopRemote: the shared controller with WFC refresh, where
+      Ctrl+C detaches (never shuts down) and WFC Q still needs YES to quit the BBS.
+      Never add a TCP listener. Bound: one attached console, four sockets, 5 s
+      handshake, 32 KiB frames, 4,096-character input (client chunks 1,024),
+      200 burst / 100 per second, 1 MiB output (slow readers are dropped), captured
+      idle timeout. `--probe` authenticates and exits for container health checks.
+      Stale-socket recovery unlinks only a same-UID socket that refuses connections.
+17. `Dockerfile` and `deploy/k8s/` package the BBS: non-root, read-only root,
+      TLS on 0.0.0.0:9923 with plaintext telnet still loopback, /data volume,
+      one replica with Recreate, externalTrafficPolicy Local (per-IP limits need
+      real caller addresses), console-probe health checks, `pods/exec` sysop Role.
+      Keep them in sync with config variables; never bake secrets or data in.
+      `deploy/podman/dev.js` (npm run dev:up/dev:status/dev:down) runs the same image
+      and hardening locally on 127.0.0.1:9923 with Podman secrets generated into the
+      Git-ignored .dev/; test the console with `podman exec -it`, which mirrors
+      `kubectl exec`. Do not add SSH sidecars: SSH is for VPS hosts running the BBS.
 
 ## Sysop operations
 

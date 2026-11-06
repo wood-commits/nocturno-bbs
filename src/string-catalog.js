@@ -143,6 +143,7 @@ export const catalog = [
   ['wfc_uptime', '|07|17  |DA |15UTC|07    Up |15|{UPTIME}|07'],
   ['wfc_statistics', '|07  Users: |15|{USERS}|07    Posts: |15|MP|07    Calls: |15|CS|07    Today: |15|{TODAY}|07'],
   ['wfc_active', '|07  Active nodes: |10|{COUNT}|07    |14Ctrl+C|07 to shut down'],
+  ['wfc_active_remote', '|07  Active nodes: |10|{COUNT}|07    |14Ctrl+C|07 to detach (BBS keeps running)'],
   ['wfc_listeners', '|11  CARRIER / LISTENERS|07'],
   ['wfc_nodes', '|03  NODE    CALLER                     STATUS|07'],
   ['wfc_node', '|11  |{ID}|15  |{HANDLE}|10   |{STATE}|07'],

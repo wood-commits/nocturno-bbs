@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: nocturno
+spec:
+  type: LoadBalancer
+  # Required: keep callers' real source addresses. Without it, traffic is SNATed to
+  # node IPs and every caller shares the per-IP connection/login limits.
+  externalTrafficPolicy: Local
+  selector:
+    app.kubernetes.io/name: nocturno
+  ports:
+    - name: telnets
+      port: 9923
+      targetPort: telnets
+      protocol: TCP

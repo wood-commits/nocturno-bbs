@@ -19,3 +19,5 @@ coverage/
 .env
 *.sqlite*
 bbs.code-workspace
+# Local test pod credentials (deploy/podman/dev.js).
+/.dev/

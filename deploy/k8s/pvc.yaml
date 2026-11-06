@@ -1,0 +1,10 @@
+# SQLite database and uploaded file payloads. One writer only: ReadWriteOnce.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: nocturno-data
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 5Gi

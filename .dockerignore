@@ -1,0 +1,23 @@
+# Keep secrets, data and private artwork out of the image build context.
+.git
+.github
+.vscode
+node_modules
+coverage
+data
+ansi
+deploy
+test
+*.sqlite*
+*.db
+*.db-*
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+*.jks
+.env
+.env.*
+*.log
+.dev

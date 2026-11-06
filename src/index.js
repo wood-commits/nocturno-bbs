@@ -4,12 +4,14 @@ import { config } from './config.js';
 import { ansi } from './screens.js';
 import { startSysopConsole } from './sysop.js';
 import { startMcpServer } from './mcp-server.js';
+import { startConsoleServer } from './console-server.js';
 import { reportError as report, reportStartupError } from './errors.js';
 
 let store;
 let bbs;
 let sysop;
 let mcp;
+let remoteConsole;
 let shuttingDown = false;
 let startupStage = 'configuration';
 async function shutdown() {
@@ -17,6 +19,12 @@ async function shutdown() {
   shuttingDown = true;
   try { if (sysop) sysop.stop(); }
   catch (error) {
+    report(error);
+    process.exitCode = 1;
+  }
+  try {
+    if (remoteConsole) await remoteConsole.close();
+  } catch (error) {
     report(error);
     process.exitCode = 1;
   }
@@ -45,6 +53,11 @@ try {
   if (options.mcp) {
     startupStage = 'mcp';
     mcp = await startMcpServer({ ...options.mcp, store, bbs,
+      onQuit: () => { void shutdown(); }, onError: report });
+  }
+  if (options.remoteConsole) {
+    startupStage = 'remote-console';
+    remoteConsole = await startConsoleServer({ ...options.remoteConsole, store, bbs,
       onQuit: () => { void shutdown(); }, onError: report });
   }
   if (process.stdin.isTTY && process.stdout.isTTY && options.dashboard) {
